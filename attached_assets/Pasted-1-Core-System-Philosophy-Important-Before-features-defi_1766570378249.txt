@@ -1,0 +1,375 @@
+1. Core System Philosophy (Important)
+
+Before features, define rules:
+
+Files are metadata, not blobs
+
+Actual files live in storage (local / S3 / MinIO)
+
+SQL stores metadata + permissions + history
+
+Everything is permission-driven
+
+If permission logic is weak → system is useless
+
+Nothing is permanently deleted
+
+Soft delete + version history
+
+Every action is auditable
+
+Even failed attempts
+
+2. User Roles (RBAC + ABAC)
+Default Roles
+Role	Capabilities
+SuperAdmin	System-wide control, role creation, storage config
+Admin	User mgmt, folder policies, audit logs
+Staff	Upload, edit, move, limited delete
+Employee	Read / upload to assigned folders
+Guest (optional)	Read-only shared access
+
+⚠️ Do NOT hardcode roles
+Use Role-Based + Attribute-Based Access Control (RBAC + ABAC)
+
+3. Folder & File Hierarchy (Critical)
+Folder Features
+
+Unlimited nesting
+
+Parent → Child permission inheritance
+
+Override at any level
+
+Folder-level quotas
+
+Folder owners
+
+Folder policies:
+
+Allowed file types
+
+Max file size
+
+Auto-versioning on replace
+
+File Features
+
+Versioning (v1, v2, v3…)
+
+Locking (check-out / check-in)
+
+File metadata:
+
+Size
+
+Mime type
+
+Hash (SHA256)
+
+Created by
+
+Last accessed
+
+4. Permissions Model (THIS MAKES OR BREAKS IT)
+Permission Types
+Permission	Meaning
+view	See file/folder
+read	Download
+write	Upload / replace
+delete	Soft delete
+share	Create share links
+manage	Change permissions
+Permission Scope
+
+User
+
+Role
+
+Group (VERY IMPORTANT)
+
+Inherited from parent folder
+
+Permission Priority (Strict Order)
+
+Explicit User Permission
+
+Group Permission
+
+Role Permission
+
+Parent Folder Permission
+
+System Default
+
+5. Bulk Operations (Advanced)
+Upload
+
+Bulk file upload
+
+Bulk folder upload (preserve structure)
+
+Drag-drop directory upload
+
+Chunked upload (for large files)
+
+Resume interrupted uploads
+
+Download
+
+Multi-select download
+
+Auto ZIP creation on download
+
+Streaming ZIP (no temp files)
+
+Password-protected ZIP (optional)
+
+Extract
+
+Auto extract ZIP on upload (configurable)
+
+Virus scan before extraction
+
+Filename collision handling
+
+6. Sidebar Features (Not Cosmetic — Functional)
+
+Your sidebar should have:
+
+📁 My Files
+
+🏢 Department Files
+
+👥 Shared With Me
+
+⭐ Starred
+
+🗑️ Trash
+
+🕒 Recent
+
+🔍 Advanced Search
+
+📊 Storage Usage
+
+⚙️ Settings
+
+🧾 Audit Logs
+
+7. Search & Indexing (Often Ignored)
+Search Must Support:
+
+File name
+
+File content (PDF/DOCX indexing)
+
+Owner
+
+Tags
+
+Date ranges
+
+File size
+
+File type
+
+Use:
+
+SQL (basic)
+
+Elasticsearch / Meilisearch (advanced)
+
+8. Audit Logs (Non-Negotiable)
+Logged Actions
+
+Upload
+
+Download
+
+View
+
+Rename
+
+Move
+
+Permission change
+
+Delete / Restore
+
+Failed access attempt
+
+Audit Log Fields
+
+User ID
+
+Action
+
+Target (file/folder)
+
+Timestamp
+
+IP
+
+User Agent
+
+Result (success / denied)
+
+9. Versioning & Recovery
+
+File version history
+
+Restore older versions
+
+Compare versions (hash-based)
+
+Trash retention policy (30/60/90 days)
+
+Legal hold (cannot delete)
+
+10. Security (You MUST include this)
+
+File hash verification
+
+Antivirus scan (ClamAV)
+
+Rate limiting downloads
+
+Encrypted storage (at rest)
+
+Signed URLs (temporary download links)
+
+Watermark PDFs (optional)
+
+11. Notifications & Automation
+
+Email / in-app notifications on:
+
+Upload
+
+Share
+
+Delete
+
+Permission change
+
+Webhooks (for integrations)
+
+Auto cleanup jobs
+
+Auto archive old files
+
+12. SQL DATABASE DESIGN (CORE TABLES)
+Users
+users (
+  id,
+  name,
+  email,
+  role_id,
+  status
+)
+
+Roles
+roles (
+  id,
+  name
+)
+
+Groups
+groups (
+  id,
+  name
+)
+
+Files
+files (
+  id,
+  folder_id,
+  name,
+  path,
+  size,
+  mime_type,
+  hash,
+  version,
+  created_by,
+  is_deleted
+)
+
+Folders
+folders (
+  id,
+  parent_id,
+  name,
+  owner_id,
+  is_deleted
+)
+
+Permissions
+permissions (
+  id,
+  target_type, -- file/folder
+  target_id,
+  subject_type, -- user/role/group
+  subject_id,
+  can_view,
+  can_read,
+  can_write,
+  can_delete,
+  can_share,
+  can_manage
+)
+
+Audit Logs
+audit_logs (
+  id,
+  user_id,
+  action,
+  target_type,
+  target_id,
+  ip_address,
+  created_at
+)
+
+13. Things You DIDN’T Mention (But Must Add)
+
+❌ Without these your system is weak:
+
+Groups / Departments
+
+File versioning
+
+Soft delete + trash
+
+Chunked uploads
+
+Search indexing
+
+Legal hold
+
+File locking
+
+Quotas
+
+Webhooks
+
+Background jobs
+
+14. Tech Stack Suggestion (SQL-Friendly)
+
+Backend:
+
+Laravel / Django / NestJS
+
+Background jobs (Redis + workers)
+
+Database:
+
+PostgreSQL (best for permissions & JSON)
+
+MySQL if needed
+
+Storage:
+
+Local (dev)
+
+S3 / MinIO (prod)
