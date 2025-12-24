@@ -70,9 +70,9 @@ export const api = {
   fs: {
     list: {
       method: 'GET' as const,
-      path: '/api/fs', // Query param ?folderId=...
+      path: '/api/fs',
       input: z.object({
-        folderId: z.string().optional(), // "root" or ID
+        folderId: z.string().optional(),
       }).optional(),
       responses: {
         200: z.object({
@@ -80,6 +80,27 @@ export const api = {
           files: z.array(z.custom<typeof files.$inferSelect>()),
           breadcrumbs: z.array(z.object({ id: z.number(), name: z.string() })),
         }),
+      },
+    },
+    recent: {
+      method: 'GET' as const,
+      path: '/api/fs/recent',
+      responses: {
+        200: z.array(z.custom<typeof files.$inferSelect>()),
+      },
+    },
+    starred: {
+      method: 'GET' as const,
+      path: '/api/fs/starred',
+      responses: {
+        200: z.array(z.custom<typeof files.$inferSelect>()),
+      },
+    },
+    trash: {
+      method: 'GET' as const,
+      path: '/api/fs/trash',
+      responses: {
+        200: z.array(z.custom<typeof files.$inferSelect>()),
       },
     },
     createFolder: {
@@ -91,7 +112,31 @@ export const api = {
         400: errorSchemas.validation,
       },
     },
-    // File upload is multipart/form-data, handled specially
+    toggleStar: {
+      method: 'PATCH' as const,
+      path: '/api/fs/:fileId/star',
+      responses: {
+        200: z.custom<typeof files.$inferSelect>(),
+      },
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/fs/:fileId',
+      responses: {
+        204: z.void(),
+      },
+    },
+    storageUsage: {
+      method: 'GET' as const,
+      path: '/api/storage-usage',
+      responses: {
+        200: z.object({
+          used: z.number(),
+          total: z.number(),
+          percentage: z.number(),
+        }),
+      },
+    },
   },
   audit: {
     list: {

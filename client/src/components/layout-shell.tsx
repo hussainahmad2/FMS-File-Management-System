@@ -33,13 +33,15 @@ export function LayoutShell({ children }: { children: ReactNode }) {
   const isAdmin = user?.role === "superadmin" || user?.role === "admin";
 
   const navigation = [
-    { name: "My Files", href: "/", icon: Folder },
-    { name: "Recent", href: "/recent", icon: Clock },
-    { name: "Trash", href: "/trash", icon: Trash2 },
+    { name: "My Files", href: "/", icon: Folder, group: "main" },
+    { name: "Recent", href: "/recent", icon: Clock, group: "main" },
+    { name: "Starred", href: "/starred", icon: Folder, group: "main" },
+    { name: "Trash", href: "/trash", icon: Trash2, group: "main" },
     ...(isAdmin ? [
-      { name: "User Management", href: "/admin/users", icon: Users },
-      { name: "Audit Logs", href: "/admin/audit", icon: ShieldAlert },
+      { name: "User Management", href: "/admin/users", icon: Users, group: "admin" },
+      { name: "Audit Logs", href: "/admin/audit", icon: ShieldAlert, group: "admin" },
     ] : []),
+    { name: "Settings", href: "/settings", icon: Settings, group: "bottom" },
   ];
 
   return (

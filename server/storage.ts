@@ -18,6 +18,12 @@ export interface IStorage {
   getFile(id: number): Promise<File | undefined>;
   getFiles(folderId: number | null): Promise<File[]>;
   createFile(file: InsertFile): Promise<File>;
+  getRecentFiles(): Promise<File[]>;
+  getStarredFiles(): Promise<File[]>;
+  getTrashFiles(): Promise<File[]>;
+  toggleStar(fileId: number): Promise<File | undefined>;
+  deleteFile(fileId: number): Promise<void>;
+  calculateStorageUsage(): Promise<{ used: number; total: number }>;
 
   // Audit
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
@@ -68,17 +74,48 @@ export class DatabaseStorage implements IStorage {
 
   async getFiles(folderId: number | null): Promise<File[]> {
     if (folderId === null) {
-      // Assuming files must be in a folder, or we allow root files?
-      // If root files allowed, folderId would be null.
-      // Schema allows null folderId? "folderId: integer..." - nullable isn't explicitly set in schema.ts, default is not null?
-      // Let's check schema.ts.
-      // "folderId: integer("folder_id").references..."
-      // By default columns are nullable unless .notNull() is called.
-      // My schema.ts: folderId: integer("folder_id").references(...)
-      // It is nullable.
       return await db.select().from(files).where(isNull(files.folderId));
     }
     return await db.select().from(files).where(eq(files.folderId, folderId));
+  }
+
+  async getRecentFiles(): Promise<File[]> {
+    return await db.select().from(files)
+      .where((f) => f.isDeleted === false)
+      .orderBy(files.lastAccessedAt)
+      .limit(10);
+  }
+
+  async getStarredFiles(): Promise<File[]> {
+    return await db.select().from(files)
+      .where((f) => f.isStarred === true && f.isDeleted === false);
+  }
+
+  async getTrashFiles(): Promise<File[]> {
+    return await db.select().from(files)
+      .where((f) => f.isDeleted === true);
+  }
+
+  async toggleStar(fileId: number): Promise<File | undefined> {
+    const [file] = await db.select().from(files).where(eq(files.id, fileId));
+    if (!file) return undefined;
+    const [updated] = await db.update(files)
+      .set({ isStarred: !file.isStarred })
+      .where(eq(files.id, fileId))
+      .returning();
+    return updated;
+  }
+
+  async deleteFile(fileId: number): Promise<void> {
+    await db.update(files).set({ isDeleted: true }).where(eq(files.id, fileId));
+  }
+
+  async calculateStorageUsage(): Promise<{ used: number; total: number }> {
+    const result = await db.select({
+      total: files.size
+    }).from(files).where((f) => f.isDeleted === false);
+    const used = result.reduce((sum, row) => sum + (row.total || 0), 0);
+    return { used, total: 10 * 1024 * 1024 * 1024 }; // 10GB total
   }
 
   async createFile(insertFile: InsertFile): Promise<File> {

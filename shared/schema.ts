@@ -19,6 +19,7 @@ export const folders = pgTable("folders", {
   name: text("name").notNull(),
   parentId: integer("parent_id"), // Can be null for root folders
   ownerId: integer("owner_id").references(() => users.id),
+  isDeleted: boolean("is_deleted").default(false), // Soft delete
   createdAt: timestamp("created_at").defaultNow(),
   path: text("path").notNull().default("/"), // Materialized path for easier querying
 });
@@ -31,6 +32,9 @@ export const files = pgTable("files", {
   mimeType: text("mime_type").notNull(),
   path: text("path").notNull(), // Storage path
   createdBy: integer("created_by").references(() => users.id),
+  isStarred: boolean("is_starred").default(false),
+  isDeleted: boolean("is_deleted").default(false), // Soft delete
+  lastAccessedAt: timestamp("last_accessed_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

@@ -120,6 +120,69 @@ export async function registerRoutes(
     }
   });
 
+  // === FILE OPERATIONS - ADDITIONAL ===
+  app.get(api.fs.recent.path, requireAuth, async (req, res) => {
+    const files = await storage.getRecentFiles();
+    await storage.createAuditLog({
+      userId: req.user.id,
+      action: "view_recent",
+      targetType: "folder",
+      details: "Viewed recent files",
+      ipAddress: req.ip
+    });
+    res.json(files);
+  });
+
+  app.get(api.fs.starred.path, requireAuth, async (req, res) => {
+    const files = await storage.getStarredFiles();
+    res.json(files);
+  });
+
+  app.get(api.fs.trash.path, requireAuth, async (req, res) => {
+    const files = await storage.getTrashFiles();
+    res.json(files);
+  });
+
+  app.patch(api.fs.toggleStar.path, requireAuth, async (req, res) => {
+    try {
+      const fileId = parseInt(req.params.fileId);
+      const file = await storage.toggleStar(fileId);
+      if (!file) {
+        return res.status(404).json({ message: "File not found" });
+      }
+      res.json(file);
+    } catch (e) {
+      res.status(400).json({ message: "Invalid request" });
+    }
+  });
+
+  app.delete(api.fs.delete.path, requireAuth, async (req, res) => {
+    try {
+      const fileId = parseInt(req.params.fileId);
+      await storage.deleteFile(fileId);
+      await storage.createAuditLog({
+        userId: req.user.id,
+        action: "delete_file",
+        targetType: "file",
+        targetId: fileId,
+        details: `Deleted file ${fileId}`,
+        ipAddress: req.ip
+      });
+      res.sendStatus(204);
+    } catch (e) {
+      res.status(400).json({ message: "Invalid request" });
+    }
+  });
+
+  app.get(api.fs.storageUsage.path, requireAuth, async (req, res) => {
+    const { used, total } = await storage.calculateStorageUsage();
+    res.json({
+      used,
+      total,
+      percentage: Math.round((used / total) * 100)
+    });
+  });
+
   // === AUDIT LOGS ===
   app.get(api.audit.list.path, requireAdmin, async (req, res) => {
     const logs = await storage.getAuditLogs();
