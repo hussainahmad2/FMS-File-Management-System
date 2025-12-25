@@ -25,9 +25,11 @@ export interface IStorage {
   moveFolder(folderId: number, targetFolderId: number | null): Promise<Folder | undefined>;
   deleteFolder(folderId: number, userId: number): Promise<void>;
   restoreFolder(folderId: number): Promise<void>;
-  permanentDeleteFolder(folderId: number): Promise<void>;
+  restoreFolder(folderId: number): Promise<void>;
+  permanentDeleteFolder(folderId: number): Promise<File[]>;
   getFolderSize(folderId: number): Promise<number>;
-  
+  getFolderSize(folderId: number): Promise<number>;
+
   // Files
   getFile(id: number): Promise<File | undefined>;
   getFiles(folderId: number | null, userId: number): Promise<File[]>;
@@ -43,7 +45,7 @@ export interface IStorage {
   permanentDeleteFile(fileId: number): Promise<void>;
   renameFile(fileId: number, newName: string): Promise<File | undefined>;
   moveFile(fileId: number, targetFolderId: number | null): Promise<File | undefined>;
-  
+
   calculateStorageUsage(): Promise<{ used: number; total: number }>;
 
   // Audit
@@ -54,7 +56,8 @@ export interface IStorage {
   createPermission(perm: InsertPermission): Promise<Permission>;
   deletePermission(id: number): Promise<void>;
   getPermissions(targetId: number, targetType: 'file' | 'folder'): Promise<(Permission & { user: User })[]>;
-  checkAccess(targetId: number, targetType: 'file' | 'folder', userId: number, requiredLevel: 'view' | 'edit'): Promise<boolean>;
+  checkAccess(targetId: number, targetType: 'file' | 'folder', userId: number, requiredLevel: 'view' | 'download' | 'edit'): Promise<boolean>;
+  removePermission(targetId: number, targetType: 'file' | 'folder', userId: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -107,7 +110,7 @@ export class DatabaseStorage implements IStorage {
     const sharedFolders = await db.select({ folderId: permissionsTable.folderId })
       .from(permissionsTable)
       .where(and(eq(permissionsTable.userId, userId), isNull(permissionsTable.fileId)));
-    
+
     const sharedFolderIds = sharedFolders.map(p => p.folderId).filter((id): id is number => id !== null);
 
     if (parentId === null) {
@@ -115,26 +118,26 @@ export class DatabaseStorage implements IStorage {
       const conditions = [
         and(isNull(folders.parentId), eq(folders.ownerId, userId), eq(folders.isDeleted, false))
       ];
-      
+
       if (sharedFolderIds.length > 0) {
         conditions.push(and(inArray(folders.id, sharedFolderIds), eq(folders.isDeleted, false)));
       }
-      
+
       return await db.select().from(folders).where(or(...conditions));
     }
-    
+
     return await db.select().from(folders).where(and(eq(folders.parentId, parentId), eq(folders.isDeleted, false)));
   }
 
   async getFoldersWithPermissions(parentId: number | null, userId: number): Promise<FolderWithPermission[]> {
     // Get all permissions for this user on folders
-    const userPermissions = await db.select({ 
+    const userPermissions = await db.select({
       folderId: permissionsTable.folderId,
-      accessLevel: permissionsTable.accessLevel 
+      accessLevel: permissionsTable.accessLevel
     })
       .from(permissionsTable)
       .where(and(eq(permissionsTable.userId, userId), isNull(permissionsTable.fileId)));
-    
+
     const permissionMap = new Map<number, string>();
     userPermissions.forEach(p => {
       if (p.folderId) permissionMap.set(p.folderId, p.accessLevel);
@@ -143,16 +146,16 @@ export class DatabaseStorage implements IStorage {
     const sharedFolderIds = userPermissions.map(p => p.folderId).filter((id): id is number => id !== null);
 
     let folderList: Folder[] = [];
-    
+
     if (parentId === null) {
       const conditions = [
         and(isNull(folders.parentId), eq(folders.ownerId, userId), eq(folders.isDeleted, false))
       ];
-      
+
       if (sharedFolderIds.length > 0) {
         conditions.push(and(inArray(folders.id, sharedFolderIds), eq(folders.isDeleted, false)));
       }
-      
+
       folderList = await db.select().from(folders).where(or(...conditions));
     } else {
       folderList = await db.select().from(folders).where(and(eq(folders.parentId, parentId), eq(folders.isDeleted, false)));
@@ -162,10 +165,10 @@ export class DatabaseStorage implements IStorage {
     return folderList.map(folder => {
       const isOwner = folder.ownerId === userId;
       const sharedAccessLevel = permissionMap.get(folder.id);
-      const accessLevel: 'owner' | 'view' | 'download' | 'edit' = isOwner 
-        ? 'owner' 
+      const accessLevel: 'owner' | 'view' | 'download' | 'edit' = isOwner
+        ? 'owner'
         : (sharedAccessLevel as 'view' | 'download' | 'edit') || 'view';
-      
+
       return { ...folder, isOwner, accessLevel };
     });
   }
@@ -185,7 +188,7 @@ export class DatabaseStorage implements IStorage {
     const sharedFiles = await db.select({ fileId: permissionsTable.fileId })
       .from(permissionsTable)
       .where(and(eq(permissionsTable.userId, userId), isNull(permissionsTable.folderId)));
-      
+
     const sharedFileIds = sharedFiles.map(p => p.fileId).filter((id): id is number => id !== null);
 
     if (folderId === null) {
@@ -198,19 +201,19 @@ export class DatabaseStorage implements IStorage {
       }
       return await db.select().from(files).where(or(...conditions));
     }
-    
+
     return await db.select().from(files).where(and(eq(files.folderId, folderId), eq(files.isDeleted, false)));
   }
 
   async getFilesWithPermissions(folderId: number | null, userId: number): Promise<FileWithPermission[]> {
     // Get all permissions for this user on files
-    const userPermissions = await db.select({ 
+    const userPermissions = await db.select({
       fileId: permissionsTable.fileId,
-      accessLevel: permissionsTable.accessLevel 
+      accessLevel: permissionsTable.accessLevel
     })
       .from(permissionsTable)
       .where(and(eq(permissionsTable.userId, userId), isNull(permissionsTable.folderId)));
-    
+
     const permissionMap = new Map<number, string>();
     userPermissions.forEach(p => {
       if (p.fileId) permissionMap.set(p.fileId, p.accessLevel);
@@ -219,7 +222,7 @@ export class DatabaseStorage implements IStorage {
     const sharedFileIds = userPermissions.map(p => p.fileId).filter((id): id is number => id !== null);
 
     let fileList: File[] = [];
-    
+
     if (folderId === null) {
       const conditions = [
         and(isNull(files.folderId), eq(files.createdBy, userId), eq(files.isDeleted, false))
@@ -236,10 +239,10 @@ export class DatabaseStorage implements IStorage {
     return fileList.map(file => {
       const isOwner = file.createdBy === userId;
       const sharedAccessLevel = permissionMap.get(file.id);
-      const accessLevel: 'owner' | 'view' | 'download' | 'edit' = isOwner 
-        ? 'owner' 
+      const accessLevel: 'owner' | 'view' | 'download' | 'edit' = isOwner
+        ? 'owner'
         : (sharedAccessLevel as 'view' | 'download' | 'edit') || 'view';
-      
+
       return { ...file, isOwner, accessLevel };
     });
   }
@@ -303,11 +306,11 @@ export class DatabaseStorage implements IStorage {
   async toggleStar(fileId: number): Promise<File | undefined> {
     const [file] = await db.select().from(files).where(eq(files.id, fileId));
     if (!file) return undefined;
-    
+
     await db.update(files)
       .set({ isStarred: !file.isStarred })
       .where(eq(files.id, fileId));
-      
+
     return (await this.getFile(fileId));
   }
 
@@ -347,7 +350,7 @@ export class DatabaseStorage implements IStorage {
   async moveFolder(folderId: number, targetFolderId: number | null): Promise<Folder | undefined> {
     const [folder] = await db.select().from(folders).where(eq(folders.id, folderId));
     if (!folder) return undefined;
-    
+
     // Prevent moving folder into itself or its children
     if (folderId === targetFolderId) return undefined;
     // (A full cycle check would be ideal here but for now simple check)
@@ -359,7 +362,7 @@ export class DatabaseStorage implements IStorage {
   async deleteFolder(folderId: number, userId: number): Promise<void> {
     // Soft delete the folder
     await db.update(folders).set({ isDeleted: true, deletedAt: new Date(), deletedBy: userId }).where(eq(folders.id, folderId));
-    
+
     // Recursive soft delete for children could be done here, but for now filtering parent is enough for view.
     // However, to be thorough:
     // This requires recursive traversal which is hard without CTEs or multiple queries.
@@ -371,10 +374,29 @@ export class DatabaseStorage implements IStorage {
     await db.update(folders).set({ isDeleted: false, deletedAt: null, deletedBy: null }).where(eq(folders.id, folderId));
   }
 
-  async permanentDeleteFolder(folderId: number): Promise<void> {
-    // Delete direct children files first, then delete the folder
+  async permanentDeleteFolder(folderId: number): Promise<File[]> {
+    const allFiles: File[] = [];
+
+    // 1. Get direct children files
+    const directFiles = await db.select().from(files).where(eq(files.folderId, folderId));
+    allFiles.push(...directFiles);
+
+    // 2. Get direct children folders
+    const childFolders = await db.select().from(folders).where(eq(folders.parentId, folderId));
+
+    // 3. Recurse
+    for (const child of childFolders) {
+      const subFiles = await this.permanentDeleteFolder(child.id);
+      allFiles.push(...subFiles);
+    }
+
+    // 4. Delete files in this folder from DB
     await db.delete(files).where(eq(files.folderId, folderId));
+
+    // 5. Delete this folder
     await db.delete(folders).where(eq(folders.id, folderId));
+
+    return allFiles;
   }
 
   async getFolderSize(folderId: number): Promise<number> {
@@ -383,7 +405,7 @@ export class DatabaseStorage implements IStorage {
     const result = await db.select({
       total: files.size
     }).from(files).where(and(eq(files.folderId, folderId), eq(files.isDeleted, false)));
-    
+
     return result.reduce((sum, row) => sum + (row.total || 0), 0);
   }
 
@@ -431,18 +453,27 @@ export class DatabaseStorage implements IStorage {
       permission: permissionsTable,
       user: users
     })
-    .from(permissionsTable)
-    .innerJoin(users, eq(permissionsTable.userId, users.id))
-    .where(
-      targetType === 'file' 
-        ? eq(permissionsTable.fileId, targetId)
-        : eq(permissionsTable.folderId, targetId)
-    );
-    
+      .from(permissionsTable)
+      .innerJoin(users, eq(permissionsTable.userId, users.id))
+      .where(
+        targetType === 'file'
+          ? eq(permissionsTable.fileId, targetId)
+          : eq(permissionsTable.folderId, targetId)
+      );
+
     return result.map(r => ({ ...r.permission, user: r.user }));
   }
 
-  async checkAccess(targetId: number, targetType: 'file' | 'folder', userId: number, requiredLevel: 'view' | 'edit'): Promise<boolean> {
+  async removePermission(targetId: number, targetType: 'file' | 'folder', userId: number): Promise<void> {
+    await db.delete(permissionsTable).where(
+      and(
+        eq(permissionsTable.userId, userId),
+        targetType === 'file' ? eq(permissionsTable.fileId, targetId) : eq(permissionsTable.folderId, targetId)
+      )
+    );
+  }
+
+  async checkAccess(targetId: number, targetType: 'file' | 'folder', userId: number, requiredLevel: 'view' | 'download' | 'edit'): Promise<boolean> {
     // 1. Check Ownership
     if (targetType === 'file') {
       const file = await this.getFile(targetId);

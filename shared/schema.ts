@@ -37,7 +37,7 @@ export const folders = mysqlTable("folders", {
 export const files = mysqlTable("files", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  folderId: int("folder_id").references(() => folders.id),
+  folderId: int("folder_id").references(() => folders.id, { onDelete: "cascade" }),
   size: int("size").notNull(), // in bytes
   mimeType: varchar("mime_type", { length: 255 }).notNull(),
   path: text("path").notNull(), // Storage path

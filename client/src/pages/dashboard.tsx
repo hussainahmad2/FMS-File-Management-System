@@ -7,11 +7,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ViewToggle } from "@/components/view-toggle";
 import { useViewMode } from "@/hooks/use-view-mode";
-import { 
-  Folder, 
-  FileText, 
-  Image as ImageIcon, 
-  MoreVertical, 
+import {
+  Folder,
+  FileText,
+  Image as ImageIcon,
+  MoreVertical,
   ChevronRight,
   Upload,
   Home,
@@ -48,7 +48,7 @@ type AccessLevel = 'owner' | 'view' | 'download' | 'edit';
 const canShare = (accessLevel: AccessLevel) => accessLevel === 'owner';
 const canDownload = (accessLevel: AccessLevel) => accessLevel === 'owner' || accessLevel === 'download' || accessLevel === 'edit';
 const canEdit = (accessLevel: AccessLevel) => accessLevel === 'owner' || accessLevel === 'edit';
-const canDelete = (accessLevel: AccessLevel) => accessLevel === 'owner';
+const canDelete = (accessLevel: AccessLevel) => accessLevel === 'owner' || accessLevel === 'edit';
 
 function FileIcon({ mimeType, size = "md" }: { mimeType: string; size?: "sm" | "md" | "lg" }) {
   const sizeClasses = {
@@ -57,7 +57,7 @@ function FileIcon({ mimeType, size = "md" }: { mimeType: string; size?: "sm" | "
     lg: "w-8 h-8"
   };
   const cls = sizeClasses[size];
-  
+
   if (mimeType.includes("image")) return <ImageIcon className={`${cls} text-purple-500`} />;
   if (mimeType.includes("folder")) return <Folder className={`${cls} text-blue-500 fill-blue-500/20`} />;
   if (mimeType.includes("pdf")) return <FileText className={`${cls} text-red-500`} />;
@@ -67,7 +67,7 @@ function FileIcon({ mimeType, size = "md" }: { mimeType: string; size?: "sm" | "
 function FileBrowser() {
   const [match, params] = useRoute("/folder/:id");
   const folderId = match ? params.id : undefined;
-  
+
   const { data, isLoading, error } = useFileSystem(folderId);
   const deleteFileMutation = useDeleteFile();
   const deleteFolderMutation = useDeleteFolder();
@@ -78,7 +78,7 @@ function FileBrowser() {
   const [renameItem, setRenameItem] = useState<{ id: number; name: string; type: 'file' | 'folder' } | null>(null);
   const [moveItem, setMoveItem] = useState<{ id: number; name: string; type: 'file' | 'folder' } | null>(null);
   const [shareItem, setShareItem] = useState<{ id: number; name: string; type: 'file' | 'folder' } | null>(null);
-  
+
   // Multi-select state (includes accessLevel for permission-aware actions)
   type SelectedItem = { id: number; name: string; type: 'file' | 'folder'; accessLevel?: AccessLevel };
   const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([]);
@@ -96,7 +96,7 @@ function FileBrowser() {
     });
   };
 
-  const isSelected = (id: number, type: 'file' | 'folder') => 
+  const isSelected = (id: number, type: 'file' | 'folder') =>
     selectedItems.some(i => i.id === id && i.type === type);
 
   // Check if all selected items can be shared/deleted (only owners)
@@ -120,9 +120,9 @@ function FileBrowser() {
 
   const handleDelete = async (id: number, type: 'file' | 'folder') => {
     if (type === 'file') {
-       deleteFileMutation.mutate(id);
+      deleteFileMutation.mutate(id);
     } else {
-       deleteFolderMutation.mutate(id);
+      deleteFolderMutation.mutate(id);
     }
   };
 
@@ -141,7 +141,7 @@ function FileBrowser() {
         deleteFolderMutation.mutate(item.id);
       }
     }
-    
+
     toast({
       title: "Items deleted",
       description: `${selectedItems.length} items moved to trash`,
@@ -153,7 +153,7 @@ function FileBrowser() {
   // Bulk download selected items
   const handleBulkDownload = () => {
     if (selectedItems.length === 0) return;
-    
+
     // For single item, download directly
     if (selectedItems.length === 1) {
       const item = selectedItems[0];
@@ -168,13 +168,13 @@ function FileBrowser() {
     // For multiple items, use bulk download endpoint
     const fileIds = selectedItems.filter(i => i.type === 'file').map(i => i.id);
     const folderIds = selectedItems.filter(i => i.type === 'folder').map(i => i.id);
-    
+
     const params = new URLSearchParams();
     fileIds.forEach(id => params.append('fileIds', id.toString()));
     folderIds.forEach(id => params.append('folderIds', id.toString()));
-    
+
     window.open(`/api/fs/bulk-download?${params.toString()}`, '_blank');
-    
+
     toast({
       title: "Download started",
       description: `Downloading ${selectedItems.length} items as ZIP`,
@@ -215,15 +215,15 @@ function FileBrowser() {
   return (
     <div className="space-y-6">
       {/* Dialogs */}
-      <RenameDialog 
-        open={!!renameItem} 
-        onOpenChange={(open) => !open && setRenameItem(null)} 
-        item={renameItem} 
+      <RenameDialog
+        open={!!renameItem}
+        onOpenChange={(open) => !open && setRenameItem(null)}
+        item={renameItem}
       />
-      <MoveDialog 
-        open={!!moveItem} 
-        onOpenChange={(open) => !open && setMoveItem(null)} 
-        item={moveItem} 
+      <MoveDialog
+        open={!!moveItem}
+        onOpenChange={(open) => !open && setMoveItem(null)}
+        item={moveItem}
       />
       <ShareDialog
         open={!!shareItem}
@@ -317,8 +317,8 @@ function FileBrowser() {
           // Grid View
           <div className="p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             {folders.map((folder) => (
-              <div 
-                key={`folder-${folder.id}`} 
+              <div
+                key={`folder-${folder.id}`}
                 className={`group relative bg-muted/30 hover:bg-muted/50 rounded-xl p-4 transition-all hover:shadow-md ${isSelected(folder.id, 'folder') ? 'ring-2 ring-primary' : ''}`}
               >
                 <div className="absolute top-2 left-2">
@@ -377,10 +377,10 @@ function FileBrowser() {
                 </Link>
               </div>
             ))}
-            
+
             {files.map((file) => (
-              <div 
-                key={`file-${file.id}`} 
+              <div
+                key={`file-${file.id}`}
                 className={`group relative bg-muted/30 hover:bg-muted/50 rounded-xl p-4 transition-all hover:shadow-md cursor-pointer ${isSelected(file.id, 'file') ? 'ring-2 ring-primary' : ''}`}
                 onClick={() => handleViewFile(file.id)}
               >
@@ -446,8 +446,8 @@ function FileBrowser() {
           // Compact View
           <div className="divide-y divide-border/50">
             {folders.map((folder) => (
-              <div 
-                key={`folder-${folder.id}`} 
+              <div
+                key={`folder-${folder.id}`}
                 className={`flex items-center gap-3 px-4 py-2 hover:bg-muted/30 transition-colors group ${isSelected(folder.id, 'folder') ? 'bg-primary/5' : ''}`}
               >
                 <Checkbox
@@ -495,10 +495,10 @@ function FileBrowser() {
                 </DropdownMenu>
               </div>
             ))}
-            
+
             {files.map((file) => (
-              <div 
-                key={`file-${file.id}`} 
+              <div
+                key={`file-${file.id}`}
                 className={`flex items-center gap-3 px-4 py-2 hover:bg-muted/30 transition-colors group cursor-pointer ${isSelected(file.id, 'file') ? 'bg-primary/5' : ''}`}
                 onClick={() => handleViewFile(file.id)}
               >
@@ -562,7 +562,7 @@ function FileBrowser() {
               <div className="col-span-3 hidden sm:block">Last Modified</div>
               <div className="col-span-1"></div>
             </div>
-            
+
             <div className="divide-y divide-border/50">
               {folders.map((folder) => (
                 <div key={`folder-${folder.id}`} className={`grid grid-cols-12 gap-4 px-6 py-4 items-center hover:bg-muted/30 transition-colors group file-row ${isSelected(folder.id, 'folder') ? 'bg-primary/5' : ''}`}>
@@ -638,7 +638,7 @@ function FileBrowser() {
                     <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
                       <FileIcon mimeType={file.mimeType} />
                     </div>
-                    <span 
+                    <span
                       className="font-medium text-foreground truncate cursor-pointer hover:underline"
                       onClick={() => handleViewFile(file.id)}
                     >

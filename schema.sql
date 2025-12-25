@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS files (
     deleted_at TIMESTAMP NULL, -- For trash retention policy
     last_accessed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL,
+    FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_files_folder_id (folder_id),
     INDEX idx_files_created_by (created_by),
