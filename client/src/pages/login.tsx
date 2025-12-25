@@ -51,7 +51,7 @@ export default function LoginPage() {
             <div className="bg-white text-slate-900 p-2 rounded-lg">
               <FileText className="w-6 h-6" />
             </div>
-            CorpDrive
+            FMS
           </div>
         </div>
 
@@ -63,7 +63,7 @@ export default function LoginPage() {
         </div>
 
         <div className="relative z-10 text-sm text-slate-400">
-          © 2024 CorpDrive Enterprise Solutions.
+          © 2024 FMS - File Management System.
         </div>
       </div>
 
@@ -129,12 +129,6 @@ export default function LoginPage() {
               </Button>
             </form>
           </Form>
-
-          <div className="bg-muted/50 p-4 rounded-lg text-xs text-muted-foreground text-center">
-            <p>Demo Credentials:</p>
-            <p>Username: <strong>hussain</strong></p>
-            <p>Password: <strong>hussain12</strong></p>
-          </div>
         </div>
       </div>
     </div>

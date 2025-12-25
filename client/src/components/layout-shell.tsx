@@ -41,7 +41,6 @@ export function LayoutShell({ children }: { children: ReactNode }) {
       { name: "User Management", href: "/admin/users", icon: Users, group: "admin" },
       { name: "Audit Logs", href: "/admin/audit", icon: ShieldAlert, group: "admin" },
     ] : []),
-    { name: "Settings", href: "/settings", icon: Settings, group: "bottom" },
   ];
 
   return (
@@ -53,7 +52,7 @@ export function LayoutShell({ children }: { children: ReactNode }) {
             <div className="bg-primary text-primary-foreground p-1.5 rounded-lg">
               <FileText className="w-5 h-5" />
             </div>
-            CorpDrive
+            FMS
           </div>
         </div>
         
@@ -91,12 +90,12 @@ export function LayoutShell({ children }: { children: ReactNode }) {
         </SheetTrigger>
         <SheetContent side="left" className="w-64 p-0">
           <div className="p-6">
-            <div className="flex items-center gap-2 font-display text-xl font-bold text-primary">
-              <div className="bg-primary text-primary-foreground p-1.5 rounded-lg">
-                <FileText className="w-5 h-5" />
-              </div>
-              CorpDrive
+          <div className="flex items-center gap-2 font-display text-xl font-bold text-primary">
+            <div className="bg-primary text-primary-foreground p-1.5 rounded-lg">
+              <FileText className="w-5 h-5" />
             </div>
+            FMS
+          </div>
           </div>
           <nav className="flex-1 px-4 space-y-1">
             {navigation.map((item) => (

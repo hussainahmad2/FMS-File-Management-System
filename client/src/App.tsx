@@ -7,6 +7,10 @@ import { Loader2 } from "lucide-react";
 
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
+import RecentPage from "@/pages/recent";
+import StarredPage from "@/pages/starred";
+import TrashPage from "@/pages/trash";
+import SettingsPage from "@/pages/settings";
 import UsersPage from "@/pages/admin-users";
 import AuditPage from "@/pages/admin-audit";
 import NotFound from "@/pages/not-found";
@@ -56,6 +60,10 @@ function Router() {
       <Route path="/login" component={LoginPage} />
       <Route path="/" component={() => <ProtectedRoute component={DashboardPage} />} />
       <Route path="/folder/:id" component={() => <ProtectedRoute component={DashboardPage} />} />
+      <Route path="/recent" component={() => <ProtectedRoute component={RecentPage} />} />
+      <Route path="/starred" component={() => <ProtectedRoute component={StarredPage} />} />
+      <Route path="/trash" component={() => <ProtectedRoute component={TrashPage} />} />
+      <Route path="/settings" component={() => <ProtectedRoute component={SettingsPage} />} />
       <Route path="/admin/users" component={() => <AdminRoute component={UsersPage} />} />
       <Route path="/admin/audit" component={() => <AdminRoute component={AuditPage} />} />
       <Route component={NotFound} />

@@ -1,5 +1,5 @@
 import { Link, useRoute } from "wouter";
-import { useFileSystem } from "@/hooks/use-fs";
+import { useFileSystem, useDeleteFile, usePermanentDeleteFile, useDeleteFolder } from "@/hooks/use-fs";
 import { LayoutShell } from "@/components/layout-shell";
 import { CreateFolderDialog } from "@/components/create-folder-dialog";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,13 @@ import {
   MoreVertical, 
   ChevronRight,
   Upload,
-  Home
+  Home,
+  Download,
+  Trash2,
+  Edit2,
+  Move,
+  Eye,
+  Share2
 } from "lucide-react";
 import { format } from "date-fns";
 import {
@@ -21,6 +27,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+import { UploadDialog } from "@/components/upload-dialog";
+import { RenameDialog } from "@/components/rename-dialog";
+import { MoveDialog } from "@/components/move-dialog";
+import { ShareDialog } from "@/components/share-dialog";
+import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
+import { formatSize } from "@/lib/utils";
 
 function FileIcon({ mimeType }: { mimeType: string }) {
   if (mimeType.includes("image")) return <ImageIcon className="w-5 h-5 text-purple-500" />;
@@ -33,6 +47,34 @@ function FileBrowser() {
   const folderId = match ? params.id : undefined;
   
   const { data, isLoading, error } = useFileSystem(folderId);
+  const deleteFileMutation = useDeleteFile();
+  const deleteFolderMutation = useDeleteFolder();
+  const { toast } = useToast();
+
+  // Dialog States
+  const [renameItem, setRenameItem] = useState<{ id: number; name: string; type: 'file' | 'folder' } | null>(null);
+  const [moveItem, setMoveItem] = useState<{ id: number; name: string; type: 'file' | 'folder' } | null>(null);
+  const [shareItem, setShareItem] = useState<{ id: number; name: string; type: 'file' | 'folder' } | null>(null);
+
+  const handleViewFile = (fileId: number) => {
+    window.open(`/api/fs/${fileId}/view`, '_blank');
+  };
+
+  const handleDownloadFile = (fileId: number) => {
+    window.open(`/api/fs/${fileId}/download`, '_blank');
+  };
+
+  const handleDownloadFolder = (folderId: number) => {
+    window.open(`/api/fs/folders/${folderId}/download`, '_blank');
+  };
+
+  const handleDelete = async (id: number, type: 'file' | 'folder') => {
+    if (type === 'file') {
+       deleteFileMutation.mutate(id);
+    } else {
+       deleteFolderMutation.mutate(id);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -67,13 +109,30 @@ function FileBrowser() {
 
   return (
     <div className="space-y-6">
+      {/* Dialogs */}
+      <RenameDialog 
+        open={!!renameItem} 
+        onOpenChange={(open) => !open && setRenameItem(null)} 
+        item={renameItem} 
+      />
+      <MoveDialog 
+        open={!!moveItem} 
+        onOpenChange={(open) => !open && setMoveItem(null)} 
+        item={moveItem} 
+      />
+      <ShareDialog
+        open={!!shareItem}
+        onOpenChange={(open) => !open && setShareItem(null)}
+        item={shareItem}
+      />
+
       {/* Breadcrumbs & Actions */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <nav className="flex items-center text-sm text-muted-foreground overflow-x-auto pb-2 md:pb-0">
           <Link href="/" className="hover:text-primary transition-colors flex items-center gap-1">
             <Home className="w-4 h-4" />
           </Link>
-          {breadcrumbs.map((crumb) => (
+          {breadcrumbs.map((crumb, index) => (
             <div key={crumb.id} className="flex items-center">
               <ChevronRight className="w-4 h-4 mx-1" />
               <Link href={`/folder/${crumb.id}`} className="hover:text-primary transition-colors whitespace-nowrap font-medium text-foreground">
@@ -85,10 +144,7 @@ function FileBrowser() {
 
         <div className="flex items-center gap-2">
           <CreateFolderDialog parentId={folderId ? parseInt(folderId) : undefined} />
-          <Button className="gap-2 shadow-lg shadow-primary/25">
-            <Upload className="w-4 h-4" />
-            Upload File
-          </Button>
+          <UploadDialog folderId={folderId ? parseInt(folderId) : undefined} />
         </div>
       </div>
 
@@ -123,7 +179,9 @@ function FileBrowser() {
                     {folder.name}
                   </Link>
                 </div>
-                <div className="col-span-2 hidden sm:block text-sm text-muted-foreground">-</div>
+                <div className="col-span-2 hidden sm:block text-sm text-muted-foreground">
+                  {(folder as any).size ? formatSize((folder as any).size) : "-"}
+                </div>
                 <div className="col-span-3 hidden sm:block text-sm text-muted-foreground">
                   {folder.createdAt ? format(new Date(folder.createdAt), "MMM d, yyyy") : "-"}
                 </div>
@@ -135,10 +193,22 @@ function FileBrowser() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem>Rename</DropdownMenuItem>
-                      <DropdownMenuItem>Move to...</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleDownloadFolder(folder.id)}>
+                        <Download className="w-4 h-4 mr-2" /> Download Zip
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setShareItem({ id: folder.id, name: folder.name, type: 'folder' })}>
+                        <Share2 className="w-4 h-4 mr-2" /> Share
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setRenameItem({ id: folder.id, name: folder.name, type: 'folder' })}>
+                        <Edit2 className="w-4 h-4 mr-2" /> Rename
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setMoveItem({ id: folder.id, name: folder.name, type: 'folder' })}>
+                        <Move className="w-4 h-4 mr-2" /> Move to...
+                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
+                      <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(folder.id, 'folder')}>
+                        <Trash2 className="w-4 h-4 mr-2" /> Delete
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -151,10 +221,15 @@ function FileBrowser() {
                   <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
                     <FileIcon mimeType={file.mimeType} />
                   </div>
-                  <span className="font-medium text-foreground truncate">{file.name}</span>
+                  <span 
+                    className="font-medium text-foreground truncate cursor-pointer hover:underline"
+                    onClick={() => handleViewFile(file.id)}
+                  >
+                    {file.name}
+                  </span>
                 </div>
                 <div className="col-span-2 hidden sm:block text-sm text-muted-foreground">
-                  {(file.size / 1024).toFixed(1)} KB
+                  {formatSize(file.size)}
                 </div>
                 <div className="col-span-3 hidden sm:block text-sm text-muted-foreground">
                   {file.createdAt ? format(new Date(file.createdAt), "MMM d, yyyy") : "-"}
@@ -167,10 +242,25 @@ function FileBrowser() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem>Download</DropdownMenuItem>
-                      <DropdownMenuItem>Rename</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleViewFile(file.id)}>
+                        <Eye className="w-4 h-4 mr-2" /> View
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleDownloadFile(file.id)}>
+                        <Download className="w-4 h-4 mr-2" /> Download
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setShareItem({ id: file.id, name: file.name, type: 'file' })}>
+                        <Share2 className="w-4 h-4 mr-2" /> Share
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setRenameItem({ id: file.id, name: file.name, type: 'file' })}>
+                        <Edit2 className="w-4 h-4 mr-2" /> Rename
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setMoveItem({ id: file.id, name: file.name, type: 'file' })}>
+                        <Move className="w-4 h-4 mr-2" /> Move to...
+                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
+                      <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(file.id, 'file')}>
+                        <Trash2 className="w-4 h-4 mr-2" /> Delete
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
