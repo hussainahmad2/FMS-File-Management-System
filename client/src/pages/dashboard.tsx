@@ -20,7 +20,8 @@ import {
   Edit2,
   Move,
   Eye,
-  Share2
+  Share2,
+  X
 } from "lucide-react";
 import { format } from "date-fns";
 import {
@@ -35,9 +36,19 @@ import { UploadDialog } from "@/components/upload-dialog";
 import { RenameDialog } from "@/components/rename-dialog";
 import { MoveDialog } from "@/components/move-dialog";
 import { ShareDialog } from "@/components/share-dialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { formatSize } from "@/lib/utils";
+
+// Permission type for files/folders
+type AccessLevel = 'owner' | 'view' | 'download' | 'edit';
+
+// Permission helpers
+const canShare = (accessLevel: AccessLevel) => accessLevel === 'owner';
+const canDownload = (accessLevel: AccessLevel) => accessLevel === 'owner' || accessLevel === 'download' || accessLevel === 'edit';
+const canEdit = (accessLevel: AccessLevel) => accessLevel === 'owner' || accessLevel === 'edit';
+const canDelete = (accessLevel: AccessLevel) => accessLevel === 'owner';
 
 function FileIcon({ mimeType, size = "md" }: { mimeType: string; size?: "sm" | "md" | "lg" }) {
   const sizeClasses = {
@@ -68,11 +79,13 @@ function FileBrowser() {
   const [moveItem, setMoveItem] = useState<{ id: number; name: string; type: 'file' | 'folder' } | null>(null);
   const [shareItem, setShareItem] = useState<{ id: number; name: string; type: 'file' | 'folder' } | null>(null);
   
-  // Multi-select state
-  const [selectedItems, setSelectedItems] = useState<{ id: number; name: string; type: 'file' | 'folder' }[]>([]);
+  // Multi-select state (includes accessLevel for permission-aware actions)
+  type SelectedItem = { id: number; name: string; type: 'file' | 'folder'; accessLevel?: AccessLevel };
+  const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([]);
   const [shareMultipleOpen, setShareMultipleOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
-  const toggleSelection = (item: { id: number; name: string; type: 'file' | 'folder' }) => {
+  const toggleSelection = (item: SelectedItem) => {
     setSelectedItems(prev => {
       const isSelected = prev.some(i => i.id === item.id && i.type === item.type);
       if (isSelected) {
@@ -85,6 +98,11 @@ function FileBrowser() {
 
   const isSelected = (id: number, type: 'file' | 'folder') => 
     selectedItems.some(i => i.id === id && i.type === type);
+
+  // Check if all selected items can be shared/deleted (only owners)
+  const canBulkShare = selectedItems.every(i => canShare(i.accessLevel || 'owner'));
+  const canBulkDelete = selectedItems.every(i => canDelete(i.accessLevel || 'owner'));
+  const canBulkDownload = selectedItems.every(i => canDownload(i.accessLevel || 'owner'));
 
   const clearSelection = () => setSelectedItems([]);
 
@@ -106,6 +124,61 @@ function FileBrowser() {
     } else {
        deleteFolderMutation.mutate(id);
     }
+  };
+
+  // Bulk delete selected items - opens confirmation dialog
+  const handleBulkDelete = () => {
+    if (selectedItems.length === 0) return;
+    setDeleteConfirmOpen(true);
+  };
+
+  // Actually perform the bulk delete after confirmation
+  const confirmBulkDelete = async () => {
+    for (const item of selectedItems) {
+      if (item.type === 'file') {
+        deleteFileMutation.mutate(item.id);
+      } else {
+        deleteFolderMutation.mutate(item.id);
+      }
+    }
+    
+    toast({
+      title: "Items deleted",
+      description: `${selectedItems.length} items moved to trash`,
+    });
+    clearSelection();
+    setDeleteConfirmOpen(false);
+  };
+
+  // Bulk download selected items
+  const handleBulkDownload = () => {
+    if (selectedItems.length === 0) return;
+    
+    // For single item, download directly
+    if (selectedItems.length === 1) {
+      const item = selectedItems[0];
+      if (item.type === 'file') {
+        handleDownloadFile(item.id);
+      } else {
+        handleDownloadFolder(item.id);
+      }
+      return;
+    }
+
+    // For multiple items, use bulk download endpoint
+    const fileIds = selectedItems.filter(i => i.type === 'file').map(i => i.id);
+    const folderIds = selectedItems.filter(i => i.type === 'folder').map(i => i.id);
+    
+    const params = new URLSearchParams();
+    fileIds.forEach(id => params.append('fileIds', id.toString()));
+    folderIds.forEach(id => params.append('folderIds', id.toString()));
+    
+    window.open(`/api/fs/bulk-download?${params.toString()}`, '_blank');
+    
+    toast({
+      title: "Download started",
+      description: `Downloading ${selectedItems.length} items as ZIP`,
+    });
   };
 
   if (isLoading) {
@@ -167,6 +240,18 @@ function FileBrowser() {
         item={null}
         items={selectedItems}
       />
+      {/* Bulk delete confirmation dialog */}
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="Delete Items"
+        description="Are you sure you want to delete these items? They will be moved to trash and can be restored later."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="destructive"
+        onConfirm={confirmBulkDelete}
+        itemCount={selectedItems.length}
+      />
 
       {/* Breadcrumbs & Actions */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -187,15 +272,29 @@ function FileBrowser() {
         <div className="flex items-center gap-2">
           {/* Multi-select actions */}
           {selectedItems.length > 0 && (
-            <>
-              <span className="text-sm text-muted-foreground">{selectedItems.length} selected</span>
-              <Button variant="outline" size="sm" onClick={clearSelection}>
-                Clear
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/50 rounded-lg border">
+              <span className="text-sm font-medium">{selectedItems.length} selected</span>
+              <div className="w-px h-4 bg-border" />
+              {canBulkDownload && (
+                <Button variant="ghost" size="sm" onClick={() => handleBulkDownload()}>
+                  <Download className="w-4 h-4 mr-1" /> Download
+                </Button>
+              )}
+              {canBulkShare && (
+                <Button variant="ghost" size="sm" onClick={() => setShareMultipleOpen(true)}>
+                  <Share2 className="w-4 h-4 mr-1" /> Share
+                </Button>
+              )}
+              {canBulkDelete && (
+                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => handleBulkDelete()}>
+                  <Trash2 className="w-4 h-4 mr-1" /> Delete
+                </Button>
+              )}
+              <div className="w-px h-4 bg-border" />
+              <Button variant="ghost" size="sm" onClick={clearSelection}>
+                <X className="w-4 h-4" />
               </Button>
-              <Button size="sm" onClick={() => setShareMultipleOpen(true)}>
-                <Share2 className="w-4 h-4 mr-2" /> Share Selected
-              </Button>
-            </>
+            </div>
           )}
           <ViewToggle view={viewMode} onViewChange={setViewMode} />
           <CreateFolderDialog parentId={folderId ? parseInt(folderId) : undefined} />
@@ -225,7 +324,7 @@ function FileBrowser() {
                 <div className="absolute top-2 left-2">
                   <Checkbox
                     checked={isSelected(folder.id, 'folder')}
-                    onCheckedChange={() => toggleSelection({ id: folder.id, name: folder.name, type: 'folder' })}
+                    onCheckedChange={() => toggleSelection({ id: folder.id, name: folder.name, type: 'folder', accessLevel: (folder as any).accessLevel || 'owner' })}
                   />
                 </div>
                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -236,19 +335,34 @@ function FileBrowser() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleDownloadFolder(folder.id)}>
-                        <Download className="w-4 h-4 mr-2" /> Download Zip
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setShareItem({ id: folder.id, name: folder.name, type: 'folder' })}>
-                        <Share2 className="w-4 h-4 mr-2" /> Share
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setRenameItem({ id: folder.id, name: folder.name, type: 'folder' })}>
-                        <Edit2 className="w-4 h-4 mr-2" /> Rename
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(folder.id, 'folder')}>
-                        <Trash2 className="w-4 h-4 mr-2" /> Delete
-                      </DropdownMenuItem>
+                      {canDownload((folder as any).accessLevel || 'owner') && (
+                        <DropdownMenuItem onClick={() => handleDownloadFolder(folder.id)}>
+                          <Download className="w-4 h-4 mr-2" /> Download Zip
+                        </DropdownMenuItem>
+                      )}
+                      {canShare((folder as any).accessLevel || 'owner') && (
+                        <DropdownMenuItem onClick={() => setShareItem({ id: folder.id, name: folder.name, type: 'folder' })}>
+                          <Share2 className="w-4 h-4 mr-2" /> Share
+                        </DropdownMenuItem>
+                      )}
+                      {canEdit((folder as any).accessLevel || 'owner') && (
+                        <>
+                          <DropdownMenuItem onClick={() => setRenameItem({ id: folder.id, name: folder.name, type: 'folder' })}>
+                            <Edit2 className="w-4 h-4 mr-2" /> Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setMoveItem({ id: folder.id, name: folder.name, type: 'folder' })}>
+                            <Move className="w-4 h-4 mr-2" /> Move to...
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                      {canDelete((folder as any).accessLevel || 'owner') && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(folder.id, 'folder')}>
+                            <Trash2 className="w-4 h-4 mr-2" /> Delete
+                          </DropdownMenuItem>
+                        </>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -257,7 +371,9 @@ function FileBrowser() {
                     <Folder className="w-10 h-10 text-blue-600 fill-blue-600/20" />
                   </div>
                   <p className="text-sm font-medium truncate w-full">{folder.name}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Folder</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {(folder as any).accessLevel && (folder as any).accessLevel !== 'owner' ? `Shared (${(folder as any).accessLevel})` : 'Folder'}
+                  </p>
                 </Link>
               </div>
             ))}
@@ -271,7 +387,7 @@ function FileBrowser() {
                 <div className="absolute top-2 left-2" onClick={(e) => e.stopPropagation()}>
                   <Checkbox
                     checked={isSelected(file.id, 'file')}
-                    onCheckedChange={() => toggleSelection({ id: file.id, name: file.name, type: 'file' })}
+                    onCheckedChange={() => toggleSelection({ id: file.id, name: file.name, type: 'file', accessLevel: (file as any).accessLevel || 'owner' })}
                   />
                 </div>
                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -285,16 +401,34 @@ function FileBrowser() {
                       <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleViewFile(file.id); }}>
                         <Eye className="w-4 h-4 mr-2" /> View
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDownloadFile(file.id); }}>
-                        <Download className="w-4 h-4 mr-2" /> Download
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setShareItem({ id: file.id, name: file.name, type: 'file' }); }}>
-                        <Share2 className="w-4 h-4 mr-2" /> Share
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); handleDelete(file.id, 'file'); }}>
-                        <Trash2 className="w-4 h-4 mr-2" /> Delete
-                      </DropdownMenuItem>
+                      {canDownload((file as any).accessLevel || 'owner') && (
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDownloadFile(file.id); }}>
+                          <Download className="w-4 h-4 mr-2" /> Download
+                        </DropdownMenuItem>
+                      )}
+                      {canShare((file as any).accessLevel || 'owner') && (
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setShareItem({ id: file.id, name: file.name, type: 'file' }); }}>
+                          <Share2 className="w-4 h-4 mr-2" /> Share
+                        </DropdownMenuItem>
+                      )}
+                      {canEdit((file as any).accessLevel || 'owner') && (
+                        <>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setRenameItem({ id: file.id, name: file.name, type: 'file' }); }}>
+                            <Edit2 className="w-4 h-4 mr-2" /> Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setMoveItem({ id: file.id, name: file.name, type: 'file' }); }}>
+                            <Move className="w-4 h-4 mr-2" /> Move to...
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                      {canDelete((file as any).accessLevel || 'owner') && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); handleDelete(file.id, 'file'); }}>
+                            <Trash2 className="w-4 h-4 mr-2" /> Delete
+                          </DropdownMenuItem>
+                        </>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -318,7 +452,7 @@ function FileBrowser() {
               >
                 <Checkbox
                   checked={isSelected(folder.id, 'folder')}
-                  onCheckedChange={() => toggleSelection({ id: folder.id, name: folder.name, type: 'folder' })}
+                  onCheckedChange={() => toggleSelection({ id: folder.id, name: folder.name, type: 'folder', accessLevel: (folder as any).accessLevel || 'owner' })}
                 />
                 <Folder className="w-4 h-4 text-blue-500 shrink-0" />
                 <Link href={`/folder/${folder.id}`} className="text-sm font-medium truncate flex-1 hover:text-primary">
@@ -337,15 +471,26 @@ function FileBrowser() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => handleDownloadFolder(folder.id)}>
-                      <Download className="w-4 h-4 mr-2" /> Download
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setShareItem({ id: folder.id, name: folder.name, type: 'folder' })}>
-                      <Share2 className="w-4 h-4 mr-2" /> Share
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(folder.id, 'folder')}>
-                      <Trash2 className="w-4 h-4 mr-2" /> Delete
-                    </DropdownMenuItem>
+                    {canDownload((folder as any).accessLevel || 'owner') && (
+                      <DropdownMenuItem onClick={() => handleDownloadFolder(folder.id)}>
+                        <Download className="w-4 h-4 mr-2" /> Download
+                      </DropdownMenuItem>
+                    )}
+                    {canShare((folder as any).accessLevel || 'owner') && (
+                      <DropdownMenuItem onClick={() => setShareItem({ id: folder.id, name: folder.name, type: 'folder' })}>
+                        <Share2 className="w-4 h-4 mr-2" /> Share
+                      </DropdownMenuItem>
+                    )}
+                    {canEdit((folder as any).accessLevel || 'owner') && (
+                      <DropdownMenuItem onClick={() => setMoveItem({ id: folder.id, name: folder.name, type: 'folder' })}>
+                        <Move className="w-4 h-4 mr-2" /> Move to...
+                      </DropdownMenuItem>
+                    )}
+                    {canDelete((folder as any).accessLevel || 'owner') && (
+                      <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(folder.id, 'folder')}>
+                        <Trash2 className="w-4 h-4 mr-2" /> Delete
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -360,7 +505,7 @@ function FileBrowser() {
                 <div onClick={(e) => e.stopPropagation()}>
                   <Checkbox
                     checked={isSelected(file.id, 'file')}
-                    onCheckedChange={() => toggleSelection({ id: file.id, name: file.name, type: 'file' })}
+                    onCheckedChange={() => toggleSelection({ id: file.id, name: file.name, type: 'file', accessLevel: (file as any).accessLevel || 'owner' })}
                   />
                 </div>
                 <FileIcon mimeType={file.mimeType} size="sm" />
@@ -376,15 +521,29 @@ function FileBrowser() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDownloadFile(file.id); }}>
-                      <Download className="w-4 h-4 mr-2" /> Download
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleViewFile(file.id); }}>
+                      <Eye className="w-4 h-4 mr-2" /> View
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setShareItem({ id: file.id, name: file.name, type: 'file' }); }}>
-                      <Share2 className="w-4 h-4 mr-2" /> Share
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); handleDelete(file.id, 'file'); }}>
-                      <Trash2 className="w-4 h-4 mr-2" /> Delete
-                    </DropdownMenuItem>
+                    {canDownload((file as any).accessLevel || 'owner') && (
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDownloadFile(file.id); }}>
+                        <Download className="w-4 h-4 mr-2" /> Download
+                      </DropdownMenuItem>
+                    )}
+                    {canShare((file as any).accessLevel || 'owner') && (
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setShareItem({ id: file.id, name: file.name, type: 'file' }); }}>
+                        <Share2 className="w-4 h-4 mr-2" /> Share
+                      </DropdownMenuItem>
+                    )}
+                    {canEdit((file as any).accessLevel || 'owner') && (
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setMoveItem({ id: file.id, name: file.name, type: 'file' }); }}>
+                        <Move className="w-4 h-4 mr-2" /> Move to...
+                      </DropdownMenuItem>
+                    )}
+                    {canDelete((file as any).accessLevel || 'owner') && (
+                      <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); handleDelete(file.id, 'file'); }}>
+                        <Trash2 className="w-4 h-4 mr-2" /> Delete
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -410,7 +569,7 @@ function FileBrowser() {
                   <div className="col-span-6 flex items-center gap-3">
                     <Checkbox
                       checked={isSelected(folder.id, 'folder')}
-                      onCheckedChange={() => toggleSelection({ id: folder.id, name: folder.name, type: 'folder' })}
+                      onCheckedChange={() => toggleSelection({ id: folder.id, name: folder.name, type: 'folder', accessLevel: (folder as any).accessLevel || 'owner' })}
                       className="mr-1"
                     />
                     <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600">
@@ -434,22 +593,34 @@ function FileBrowser() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleDownloadFolder(folder.id)}>
-                          <Download className="w-4 h-4 mr-2" /> Download Zip
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setShareItem({ id: folder.id, name: folder.name, type: 'folder' })}>
-                          <Share2 className="w-4 h-4 mr-2" /> Share
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setRenameItem({ id: folder.id, name: folder.name, type: 'folder' })}>
-                          <Edit2 className="w-4 h-4 mr-2" /> Rename
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setMoveItem({ id: folder.id, name: folder.name, type: 'folder' })}>
-                          <Move className="w-4 h-4 mr-2" /> Move to...
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(folder.id, 'folder')}>
-                          <Trash2 className="w-4 h-4 mr-2" /> Delete
-                        </DropdownMenuItem>
+                        {canDownload((folder as any).accessLevel || 'owner') && (
+                          <DropdownMenuItem onClick={() => handleDownloadFolder(folder.id)}>
+                            <Download className="w-4 h-4 mr-2" /> Download Zip
+                          </DropdownMenuItem>
+                        )}
+                        {canShare((folder as any).accessLevel || 'owner') && (
+                          <DropdownMenuItem onClick={() => setShareItem({ id: folder.id, name: folder.name, type: 'folder' })}>
+                            <Share2 className="w-4 h-4 mr-2" /> Share
+                          </DropdownMenuItem>
+                        )}
+                        {canEdit((folder as any).accessLevel || 'owner') && (
+                          <>
+                            <DropdownMenuItem onClick={() => setRenameItem({ id: folder.id, name: folder.name, type: 'folder' })}>
+                              <Edit2 className="w-4 h-4 mr-2" /> Rename
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setMoveItem({ id: folder.id, name: folder.name, type: 'folder' })}>
+                              <Move className="w-4 h-4 mr-2" /> Move to...
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                        {canDelete((folder as any).accessLevel || 'owner') && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(folder.id, 'folder')}>
+                              <Trash2 className="w-4 h-4 mr-2" /> Delete
+                            </DropdownMenuItem>
+                          </>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -461,7 +632,7 @@ function FileBrowser() {
                   <div className="col-span-6 flex items-center gap-3">
                     <Checkbox
                       checked={isSelected(file.id, 'file')}
-                      onCheckedChange={() => toggleSelection({ id: file.id, name: file.name, type: 'file' })}
+                      onCheckedChange={() => toggleSelection({ id: file.id, name: file.name, type: 'file', accessLevel: (file as any).accessLevel || 'owner' })}
                       className="mr-1"
                     />
                     <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
@@ -491,22 +662,34 @@ function FileBrowser() {
                         <DropdownMenuItem onClick={() => handleViewFile(file.id)}>
                           <Eye className="w-4 h-4 mr-2" /> View
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleDownloadFile(file.id)}>
-                          <Download className="w-4 h-4 mr-2" /> Download
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setShareItem({ id: file.id, name: file.name, type: 'file' })}>
-                          <Share2 className="w-4 h-4 mr-2" /> Share
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setRenameItem({ id: file.id, name: file.name, type: 'file' })}>
-                          <Edit2 className="w-4 h-4 mr-2" /> Rename
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setMoveItem({ id: file.id, name: file.name, type: 'file' })}>
-                          <Move className="w-4 h-4 mr-2" /> Move to...
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(file.id, 'file')}>
-                          <Trash2 className="w-4 h-4 mr-2" /> Delete
-                        </DropdownMenuItem>
+                        {canDownload((file as any).accessLevel || 'owner') && (
+                          <DropdownMenuItem onClick={() => handleDownloadFile(file.id)}>
+                            <Download className="w-4 h-4 mr-2" /> Download
+                          </DropdownMenuItem>
+                        )}
+                        {canShare((file as any).accessLevel || 'owner') && (
+                          <DropdownMenuItem onClick={() => setShareItem({ id: file.id, name: file.name, type: 'file' })}>
+                            <Share2 className="w-4 h-4 mr-2" /> Share
+                          </DropdownMenuItem>
+                        )}
+                        {canEdit((file as any).accessLevel || 'owner') && (
+                          <>
+                            <DropdownMenuItem onClick={() => setRenameItem({ id: file.id, name: file.name, type: 'file' })}>
+                              <Edit2 className="w-4 h-4 mr-2" /> Rename
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setMoveItem({ id: file.id, name: file.name, type: 'file' })}>
+                              <Move className="w-4 h-4 mr-2" /> Move to...
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                        {canDelete((file as any).accessLevel || 'owner') && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(file.id, 'file')}>
+                              <Trash2 className="w-4 h-4 mr-2" /> Delete
+                            </DropdownMenuItem>
+                          </>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>

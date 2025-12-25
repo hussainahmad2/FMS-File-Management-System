@@ -182,8 +182,8 @@ export async function registerRoutes(
         breadcrumbs.push({ id: 0, name: "My Files" });
     }
 
-    let folders = await storage.getFolders(folderId, req.user!.id);
-    let files = await storage.getFiles(folderId, req.user!.id);
+    let folders = await storage.getFoldersWithPermissions(folderId, req.user!.id);
+    let files = await storage.getFilesWithPermissions(folderId, req.user!.id);
 
     // Auto-extract ZIP files in this folder
     const zipFiles = files.filter(f => 
@@ -829,6 +829,74 @@ export async function registerRoutes(
       console.error("Zip generation failed:", e);
       if (!res.headersSent) {
         res.status(500).json({ message: "Failed to generate zip" });
+      }
+    }
+  });
+
+  // === BULK DOWNLOAD (Multiple files and folders) ===
+  app.get('/api/fs/bulk-download', requireAuth, async (req, res) => {
+    try {
+      const fileIds = (req.query.fileIds as string[] || []).map(id => parseInt(id)).filter(id => !isNaN(id));
+      const folderIds = (req.query.folderIds as string[] || []).map(id => parseInt(id)).filter(id => !isNaN(id));
+
+      if (fileIds.length === 0 && folderIds.length === 0) {
+        return res.status(400).json({ message: "No items specified for download" });
+      }
+
+      const archive = archiver('zip', {
+        zlib: { level: 9 }
+      });
+
+      res.attachment('download.zip');
+      archive.pipe(res);
+
+      // Add individual files
+      for (const fileId of fileIds) {
+        const file = await storage.getFile(fileId);
+        if (file && fs.existsSync(file.path)) {
+          archive.file(file.path, { name: file.name });
+        }
+      }
+
+      // Recursive function to add folder contents
+      const addFolderToArchive = async (currentFolderId: number, archivePath: string) => {
+        const subFolders = await storage.getFolders(currentFolderId, req.user!.id);
+        const files = await storage.getFiles(currentFolderId, req.user!.id);
+
+        for (const file of files) {
+          if (fs.existsSync(file.path)) {
+            archive.file(file.path, { name: path.join(archivePath, file.name) });
+          }
+        }
+
+        for (const subFolder of subFolders) {
+          await addFolderToArchive(subFolder.id, path.join(archivePath, subFolder.name));
+        }
+      };
+
+      // Add folders with their contents
+      for (const folderId of folderIds) {
+        const folder = await storage.getFolder(folderId);
+        if (folder) {
+          await addFolderToArchive(folderId, folder.name);
+        }
+      }
+
+      await archive.finalize();
+
+      await storage.createAuditLog({
+        userId: req.user!.id,
+        action: "bulk_download",
+        targetType: "file",
+        details: `Bulk downloaded ${fileIds.length} files and ${folderIds.length} folders`,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent')
+      });
+
+    } catch (e) {
+      console.error("Bulk download failed:", e);
+      if (!res.headersSent) {
+        res.status(500).json({ message: "Failed to create bulk download" });
       }
     }
   });

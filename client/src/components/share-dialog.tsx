@@ -139,6 +139,8 @@ export function ShareDialog({ open, onOpenChange, item, items }: ShareDialogProp
     onSuccess: () => {
       toast({ title: "Permission revoked" });
       refetchPermissions();
+      // Invalidate file system cache so the shared user no longer sees the item
+      queryClient.invalidateQueries({ queryKey: ['/api/fs/list'] });
     },
     onError: () => {
       toast({ title: "Failed to revoke permission", variant: "destructive" });

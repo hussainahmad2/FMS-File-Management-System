@@ -2,6 +2,10 @@ import { users, userSettings, folders, files, auditLogs, permissions as permissi
 import { db } from "./db";
 import { eq, isNull, and, or, inArray } from "drizzle-orm";
 
+// Extended types with permission info
+export type FileWithPermission = File & { isOwner: boolean; accessLevel: 'owner' | 'view' | 'download' | 'edit' };
+export type FolderWithPermission = Folder & { isOwner: boolean; accessLevel: 'owner' | 'view' | 'download' | 'edit' };
+
 export interface IStorage {
   // Users
   getUser(id: number): Promise<User | undefined>;
@@ -15,6 +19,7 @@ export interface IStorage {
   // Folders
   getFolder(id: number): Promise<Folder | undefined>;
   getFolders(parentId: number | null, userId: number): Promise<Folder[]>;
+  getFoldersWithPermissions(parentId: number | null, userId: number): Promise<FolderWithPermission[]>;
   createFolder(folder: InsertFolder): Promise<Folder>;
   renameFolder(folderId: number, newName: string): Promise<Folder | undefined>;
   moveFolder(folderId: number, targetFolderId: number | null): Promise<Folder | undefined>;
@@ -26,6 +31,7 @@ export interface IStorage {
   // Files
   getFile(id: number): Promise<File | undefined>;
   getFiles(folderId: number | null, userId: number): Promise<File[]>;
+  getFilesWithPermissions(folderId: number | null, userId: number): Promise<FileWithPermission[]>;
   createFile(file: InsertFile): Promise<File>;
   getRecentFiles(userId: number): Promise<File[]>;
   getStarredFiles(userId: number): Promise<File[]>;
@@ -120,6 +126,50 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(folders).where(and(eq(folders.parentId, parentId), eq(folders.isDeleted, false)));
   }
 
+  async getFoldersWithPermissions(parentId: number | null, userId: number): Promise<FolderWithPermission[]> {
+    // Get all permissions for this user on folders
+    const userPermissions = await db.select({ 
+      folderId: permissionsTable.folderId,
+      accessLevel: permissionsTable.accessLevel 
+    })
+      .from(permissionsTable)
+      .where(and(eq(permissionsTable.userId, userId), isNull(permissionsTable.fileId)));
+    
+    const permissionMap = new Map<number, string>();
+    userPermissions.forEach(p => {
+      if (p.folderId) permissionMap.set(p.folderId, p.accessLevel);
+    });
+
+    const sharedFolderIds = userPermissions.map(p => p.folderId).filter((id): id is number => id !== null);
+
+    let folderList: Folder[] = [];
+    
+    if (parentId === null) {
+      const conditions = [
+        and(isNull(folders.parentId), eq(folders.ownerId, userId), eq(folders.isDeleted, false))
+      ];
+      
+      if (sharedFolderIds.length > 0) {
+        conditions.push(and(inArray(folders.id, sharedFolderIds), eq(folders.isDeleted, false)));
+      }
+      
+      folderList = await db.select().from(folders).where(or(...conditions));
+    } else {
+      folderList = await db.select().from(folders).where(and(eq(folders.parentId, parentId), eq(folders.isDeleted, false)));
+    }
+
+    // Add permission info to each folder
+    return folderList.map(folder => {
+      const isOwner = folder.ownerId === userId;
+      const sharedAccessLevel = permissionMap.get(folder.id);
+      const accessLevel: 'owner' | 'view' | 'download' | 'edit' = isOwner 
+        ? 'owner' 
+        : (sharedAccessLevel as 'view' | 'download' | 'edit') || 'view';
+      
+      return { ...folder, isOwner, accessLevel };
+    });
+  }
+
   async createFolder(insertFolder: InsertFolder): Promise<Folder> {
     const [result] = await db.insert(folders).values(insertFolder);
     const id = (result as any).insertId;
@@ -150,6 +200,48 @@ export class DatabaseStorage implements IStorage {
     }
     
     return await db.select().from(files).where(and(eq(files.folderId, folderId), eq(files.isDeleted, false)));
+  }
+
+  async getFilesWithPermissions(folderId: number | null, userId: number): Promise<FileWithPermission[]> {
+    // Get all permissions for this user on files
+    const userPermissions = await db.select({ 
+      fileId: permissionsTable.fileId,
+      accessLevel: permissionsTable.accessLevel 
+    })
+      .from(permissionsTable)
+      .where(and(eq(permissionsTable.userId, userId), isNull(permissionsTable.folderId)));
+    
+    const permissionMap = new Map<number, string>();
+    userPermissions.forEach(p => {
+      if (p.fileId) permissionMap.set(p.fileId, p.accessLevel);
+    });
+
+    const sharedFileIds = userPermissions.map(p => p.fileId).filter((id): id is number => id !== null);
+
+    let fileList: File[] = [];
+    
+    if (folderId === null) {
+      const conditions = [
+        and(isNull(files.folderId), eq(files.createdBy, userId), eq(files.isDeleted, false))
+      ];
+      if (sharedFileIds.length > 0) {
+        conditions.push(and(inArray(files.id, sharedFileIds), eq(files.isDeleted, false)));
+      }
+      fileList = await db.select().from(files).where(or(...conditions));
+    } else {
+      fileList = await db.select().from(files).where(and(eq(files.folderId, folderId), eq(files.isDeleted, false)));
+    }
+
+    // Add permission info to each file
+    return fileList.map(file => {
+      const isOwner = file.createdBy === userId;
+      const sharedAccessLevel = permissionMap.get(file.id);
+      const accessLevel: 'owner' | 'view' | 'download' | 'edit' = isOwner 
+        ? 'owner' 
+        : (sharedAccessLevel as 'view' | 'download' | 'edit') || 'view';
+      
+      return { ...file, isOwner, accessLevel };
+    });
   }
 
   async getRecentFiles(userId: number): Promise<File[]> {
