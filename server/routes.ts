@@ -635,7 +635,7 @@ export async function registerRoutes(
       const canEdit = await storage.checkAccess(id, 'folder', req.user!.id, 'edit');
       if (!canEdit) return res.status(403).json({ message: "No permission to delete" });
 
-      await storage.deleteFolder(id);
+      await storage.deleteFolder(id, req.user!.id);
       
       await storage.createAuditLog({
         userId: req.user!.id,
@@ -648,6 +648,7 @@ export async function registerRoutes(
       });
       res.sendStatus(204);
     } catch (e) {
+      console.error("Delete folder error:", e);
       res.status(500).json({ message: "Delete failed" });
     }
   });
@@ -724,8 +725,16 @@ export async function registerRoutes(
   });
 
   app.get(api.fs.trash.path, requireAuth, async (req, res) => {
-    const files = await storage.getTrashFiles(req.user!.id);
-    res.json(files);
+    try {
+      console.log('Fetching trash for user:', req.user!.id);
+      const files = await storage.getTrashFiles(req.user!.id);
+      const folders = await storage.getTrashFolders(req.user!.id);
+      console.log('Trash fetched:', { filesCount: files.length, foldersCount: folders.length });
+      res.json({ files, folders });
+    } catch (error) {
+      console.error('Error fetching trash:', error);
+      res.status(500).json({ message: "Failed to fetch trash items" });
+    }
   });
 
   app.patch(api.fs.toggleStar.path, requireAuth, async (req, res) => {
@@ -747,7 +756,7 @@ export async function registerRoutes(
       const canEdit = await storage.checkAccess(fileId, 'file', req.user!.id, 'edit');
       if (!canEdit) return res.status(403).json({ message: "No permission to delete" });
 
-      await storage.deleteFile(fileId);
+      await storage.deleteFile(fileId, req.user!.id);
       await storage.createAuditLog({
         userId: req.user!.id,
         action: "delete_file",
@@ -782,6 +791,28 @@ export async function registerRoutes(
     }
   });
 
+  app.post('/api/fs/folders/:id/restore', requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const canEdit = await storage.checkAccess(id, 'folder', req.user!.id, 'edit');
+      // Even if it's trash, check if we own it or have edit rights
+      
+      await storage.restoreFolder(id);
+      await storage.createAuditLog({
+        userId: req.user!.id,
+        action: "restore_folder",
+        targetType: "folder",
+        targetId: id,
+        details: `Restored folder ${id} from trash`,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent')
+      });
+      res.sendStatus(200);
+    } catch (e) {
+      res.status(500).json({ message: "Restore failed" });
+    }
+  });
+
   app.delete('/api/fs/:fileId/permanent', requireAuth, async (req, res) => {
     try {
       const fileId = parseInt(req.params.fileId);
@@ -809,6 +840,28 @@ export async function registerRoutes(
       res.sendStatus(204);
     } catch (e) {
       res.status(400).json({ message: "Invalid request" });
+    }
+  });
+
+  app.delete('/api/fs/folders/:id/permanent', requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const canEdit = await storage.checkAccess(id, 'folder', req.user!.id, 'edit');
+      
+      await storage.permanentDeleteFolder(id);
+      
+      await storage.createAuditLog({
+        userId: req.user!.id,
+        action: "permanent_delete_folder",
+        targetType: "folder",
+        targetId: id,
+        details: `Permanently deleted folder ${id}`,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent')
+      });
+      res.sendStatus(204);
+    } catch (e) {
+      res.status(500).json({ message: "Delete failed" });
     }
   });
 

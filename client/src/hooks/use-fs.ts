@@ -52,7 +52,12 @@ export function useTrashFiles() {
   return useQuery({
     queryKey: [api.fs.trash.path],
     queryFn: async () => {
-      const res = await fetch(api.fs.trash.path);
+      const res = await fetch(api.fs.trash.path, {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
       if (!res.ok) throw new Error("Failed to fetch trash files");
       return api.fs.trash.responses[200].parse(await res.json());
     },
@@ -166,7 +171,8 @@ export function useDeleteFolder() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.fs.list.path] });
-      toast({ title: "Folder deleted" });
+      queryClient.invalidateQueries({ queryKey: [api.fs.trash.path] });
+      toast({ title: "Folder moved to trash" });
     },
     onError: (error: Error) => {
       toast({
@@ -205,6 +211,32 @@ export function useRestoreFile() {
   });
 }
 
+export function useRestoreFolder() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (folderId: number) => {
+      const res = await fetch(`/api/fs/folders/${folderId}/restore`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error("Failed to restore folder");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.fs.trash.path] });
+      queryClient.invalidateQueries({ queryKey: [api.fs.list.path] });
+      toast({ title: "Folder restored" });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+}
+
 export function usePermanentDeleteFile() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -219,6 +251,31 @@ export function usePermanentDeleteFile() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.fs.trash.path] });
       toast({ title: "File permanently deleted" });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+}
+
+export function usePermanentDeleteFolder() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (folderId: number) => {
+      const res = await fetch(`/api/fs/folders/${folderId}/permanent`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to permanently delete folder");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.fs.trash.path] });
+      toast({ title: "Folder permanently deleted" });
     },
     onError: (error: Error) => {
       toast({

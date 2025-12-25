@@ -1,5 +1,5 @@
 import { LayoutShell } from "@/components/layout-shell";
-import { useTrashFiles, useRestoreFile, usePermanentDeleteFile } from "@/hooks/use-fs";
+import { useTrashFiles, useRestoreFile, usePermanentDeleteFile, useRestoreFolder, usePermanentDeleteFolder } from "@/hooks/use-fs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { 
@@ -21,16 +21,23 @@ import {
 import { formatSize } from "@/lib/utils";
 
 function FileIcon({ mimeType }: { mimeType: string }) {
+  if (mimeType === "folder") return <Folder className="w-5 h-5 text-blue-500 fill-blue-500/20" />;
   if (mimeType.includes("image")) return <ImageIcon className="w-5 h-5 text-purple-500" />;
-  if (mimeType.includes("folder")) return <Folder className="w-5 h-5 text-blue-500 fill-blue-500/20" />;
   return <FileText className="w-5 h-5 text-slate-500" />;
 }
 
 export default function TrashPage() {
-  const { data: files, isLoading } = useTrashFiles();
+  const { data, isLoading } = useTrashFiles();
   const restoreFile = useRestoreFile();
   const permanentDeleteFile = usePermanentDeleteFile();
+  const restoreFolder = useRestoreFolder();
+  const permanentDeleteFolder = usePermanentDeleteFolder();
   
+  const allItems = [
+    ...(data?.folders || []).map(f => ({ ...f, type: 'folder' as const, size: 0, mimeType: 'folder' })),
+    ...(data?.files || []).map(f => ({ ...f, type: 'file' as const, mimeType: f.mimeType }))
+  ];
+
   return (
     <LayoutShell>
       <div className="space-y-6">
@@ -56,7 +63,7 @@ export default function TrashPage() {
                 <div className="col-span-1"></div>
               </div>
               
-              {files?.length === 0 ? (
+              {allItems.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-20 text-center">
                   <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4">
                     <Trash2 className="w-8 h-8 text-muted-foreground/50" />
@@ -65,20 +72,21 @@ export default function TrashPage() {
                   <p className="text-muted-foreground mt-1">Deleted items will appear here</p>
                 </div>
               ) : (
-                files?.map((file) => (
-                  <div key={file.id} className="grid grid-cols-12 gap-4 px-6 py-4 items-center hover:bg-muted/30 transition-colors group opacity-75">
+                allItems.map((item) => (
+                  <div key={`${item.type}-${item.id}`} className="grid grid-cols-12 gap-4 px-6 py-4 items-center hover:bg-muted/30 transition-colors group opacity-75">
                     <div className="col-span-6 flex items-center gap-3">
                       <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
-                        <FileIcon mimeType={file.mimeType} />
+                        <FileIcon mimeType={item.mimeType} />
                       </div>
-                      <span className="font-medium text-foreground truncate">{file.name}</span>
+                      <span className="font-medium text-foreground truncate">{item.name}</span>
                     </div>
                     <div className="col-span-2 hidden sm:block text-sm text-muted-foreground">
-                      {formatSize(file.size)}
+                      {item.type === 'file' ? formatSize(item.size) : "-"}
                     </div>
                     <div className="col-span-3 hidden sm:block text-sm text-muted-foreground">
-                      {/* Using lastAccessedAt as proxy for deleted time if we don't have deletedAt column, or just showing created for now */}
-                      {file.createdAt ? format(new Date(file.createdAt), "MMM d, yyyy") : "-"}
+                      {/* Using deletedAt if available, otherwise createdAt as fallback */}
+                      {/* Note: item.deletedAt might be string or Date depending on serialization */}
+                      {item.deletedAt ? format(new Date(item.deletedAt), "MMM d, yyyy") : (item.createdAt ? format(new Date(item.createdAt), "MMM d, yyyy") : "-")}
                     </div>
                     <div className="col-span-1 flex justify-end">
                       <DropdownMenu>
@@ -88,11 +96,11 @@ export default function TrashPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => restoreFile.mutate(file.id)}>
+                          <DropdownMenuItem onClick={() => item.type === 'file' ? restoreFile.mutate(item.id) : restoreFolder.mutate(item.id)}>
                             <RefreshCw className="w-4 h-4 mr-2" />
                             Restore
                           </DropdownMenuItem>
-                          <DropdownMenuItem className="text-destructive" onClick={() => permanentDeleteFile.mutate(file.id)}>
+                          <DropdownMenuItem className="text-destructive" onClick={() => item.type === 'file' ? permanentDeleteFile.mutate(item.id) : permanentDeleteFolder.mutate(item.id)}>
                             <X className="w-4 h-4 mr-2" />
                             Permanently Delete
                           </DropdownMenuItem>

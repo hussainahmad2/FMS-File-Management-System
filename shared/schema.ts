@@ -28,6 +28,8 @@ export const folders = mysqlTable("folders", {
   parentId: int("parent_id"), // Can be null for root folders
   ownerId: int("owner_id").references(() => users.id),
   isDeleted: boolean("is_deleted").default(false), // Soft delete
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: int("deleted_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
   path: text("path"), // Materialized path for easier querying
 });
@@ -43,6 +45,7 @@ export const files = mysqlTable("files", {
   isStarred: boolean("is_starred").default(false),
   isDeleted: boolean("is_deleted").default(false), // Soft delete
   deletedAt: timestamp("deleted_at"),
+  deletedBy: int("deleted_by").references(() => users.id),
   lastAccessedAt: timestamp("last_accessed_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
 });

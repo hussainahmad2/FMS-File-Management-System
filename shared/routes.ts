@@ -100,7 +100,10 @@ export const api = {
       method: 'GET' as const,
       path: '/api/fs/trash',
       responses: {
-        200: z.array(z.custom<typeof files.$inferSelect>()),
+        200: z.object({
+          files: z.array(z.custom<typeof files.$inferSelect>()),
+          folders: z.array(z.custom<typeof folders.$inferSelect>()),
+        }),
       },
     },
     createFolder: {
