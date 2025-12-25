@@ -182,5 +182,12 @@ export type ShareRequest = {
   targetId: number;
   targetType: 'file' | 'folder';
   userId: number; // Who to share with
-  accessLevel: 'view' | 'edit';
+  accessLevel: 'view' | 'edit' | 'download';
+};
+
+// For multi-select share
+export type MultiShareRequest = {
+  items: { id: number; type: 'file' | 'folder' }[];
+  userId: number;
+  accessLevel: 'view' | 'edit' | 'download';
 };

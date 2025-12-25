@@ -18,7 +18,9 @@ export interface IStorage {
   createFolder(folder: InsertFolder): Promise<Folder>;
   renameFolder(folderId: number, newName: string): Promise<Folder | undefined>;
   moveFolder(folderId: number, targetFolderId: number | null): Promise<Folder | undefined>;
-  deleteFolder(folderId: number): Promise<void>;
+  deleteFolder(folderId: number, userId: number): Promise<void>;
+  restoreFolder(folderId: number): Promise<void>;
+  permanentDeleteFolder(folderId: number): Promise<void>;
   getFolderSize(folderId: number): Promise<number>;
   
   // Files
@@ -28,8 +30,9 @@ export interface IStorage {
   getRecentFiles(userId: number): Promise<File[]>;
   getStarredFiles(userId: number): Promise<File[]>;
   getTrashFiles(userId: number): Promise<File[]>;
+  getTrashFolders(userId: number): Promise<Folder[]>;
   toggleStar(fileId: number): Promise<File | undefined>;
-  deleteFile(fileId: number): Promise<void>;
+  deleteFile(fileId: number, userId: number): Promise<void>;
   restoreFile(fileId: number): Promise<void>;
   permanentDeleteFile(fileId: number): Promise<void>;
   renameFile(fileId: number, newName: string): Promise<File | undefined>;
@@ -187,7 +190,22 @@ export class DatabaseStorage implements IStorage {
 
   async getTrashFiles(userId: number): Promise<File[]> {
     return await db.select().from(files)
-      .where(and(eq(files.createdBy, userId), eq(files.isDeleted, true)));
+      .where(
+        or(
+          eq(files.deletedBy, userId),
+          and(isNull(files.deletedBy), eq(files.createdBy, userId), eq(files.isDeleted, true))
+        )
+      );
+  }
+
+  async getTrashFolders(userId: number): Promise<Folder[]> {
+    return await db.select().from(folders)
+      .where(
+        or(
+          eq(folders.deletedBy, userId),
+          and(isNull(folders.deletedBy), eq(folders.ownerId, userId), eq(folders.isDeleted, true))
+        )
+      );
   }
 
   async toggleStar(fileId: number): Promise<File | undefined> {
@@ -201,12 +219,12 @@ export class DatabaseStorage implements IStorage {
     return (await this.getFile(fileId));
   }
 
-  async deleteFile(fileId: number): Promise<void> {
-    await db.update(files).set({ isDeleted: true, deletedAt: new Date() }).where(eq(files.id, fileId));
+  async deleteFile(fileId: number, userId: number): Promise<void> {
+    await db.update(files).set({ isDeleted: true, deletedAt: new Date(), deletedBy: userId }).where(eq(files.id, fileId));
   }
 
   async restoreFile(fileId: number): Promise<void> {
-    await db.update(files).set({ isDeleted: false, deletedAt: null }).where(eq(files.id, fileId));
+    await db.update(files).set({ isDeleted: false, deletedAt: null, deletedBy: null }).where(eq(files.id, fileId));
   }
 
   async permanentDeleteFile(fileId: number): Promise<void> {
@@ -246,15 +264,25 @@ export class DatabaseStorage implements IStorage {
     return (await this.getFolder(folderId))!;
   }
 
-  async deleteFolder(folderId: number): Promise<void> {
+  async deleteFolder(folderId: number, userId: number): Promise<void> {
     // Soft delete the folder
-    await db.update(folders).set({ isDeleted: true }).where(eq(folders.id, folderId));
+    await db.update(folders).set({ isDeleted: true, deletedAt: new Date(), deletedBy: userId }).where(eq(folders.id, folderId));
     
     // Recursive soft delete for children could be done here, but for now filtering parent is enough for view.
     // However, to be thorough:
     // This requires recursive traversal which is hard without CTEs or multiple queries.
     // For MVP, we assume hiding the parent hides the children.
     // Ideally: we should mark all children recursively.
+  }
+
+  async restoreFolder(folderId: number): Promise<void> {
+    await db.update(folders).set({ isDeleted: false, deletedAt: null, deletedBy: null }).where(eq(folders.id, folderId));
+  }
+
+  async permanentDeleteFolder(folderId: number): Promise<void> {
+    // Delete direct children files first, then delete the folder
+    await db.delete(files).where(eq(files.folderId, folderId));
+    await db.delete(folders).where(eq(folders.id, folderId));
   }
 
   async getFolderSize(folderId: number): Promise<number> {

@@ -182,8 +182,136 @@ export async function registerRoutes(
         breadcrumbs.push({ id: 0, name: "My Files" });
     }
 
-    const folders = await storage.getFolders(folderId, req.user!.id);
-    const files = await storage.getFiles(folderId, req.user!.id);
+    let folders = await storage.getFolders(folderId, req.user!.id);
+    let files = await storage.getFiles(folderId, req.user!.id);
+
+    // Auto-extract ZIP files in this folder
+    const zipFiles = files.filter(f => 
+      f.mimeType === 'application/zip' || 
+      f.mimeType === 'application/x-zip-compressed' ||
+      f.name.toLowerCase().endsWith('.zip')
+    );
+
+    for (const zipFile of zipFiles) {
+      try {
+        // Check if already extracted (by looking for a folder with zip name minus extension)
+        const zipFolderName = zipFile.name.replace(/\.zip$/i, '');
+        const existingFolder = folders.find(f => f.name === zipFolderName);
+        
+        if (!existingFolder && fs.existsSync(zipFile.path)) {
+          console.log(`Auto-extracting ZIP: ${zipFile.name}`);
+          
+          const zip = new AdmZip(zipFile.path);
+          const zipEntries = zip.getEntries();
+
+          // Create root folder for extracted content
+          const extractedFolder = await storage.createFolder({
+            name: zipFolderName,
+            parentId: folderId,
+            ownerId: req.user!.id
+          });
+
+          // Helper to get or create nested folders
+          const folderCache: Record<string, number> = { "": extractedFolder.id };
+          const getOrCreateFolder = async (pathStr: string): Promise<number> => {
+            if (!pathStr || pathStr === ".") return extractedFolder.id;
+            
+            pathStr = pathStr.replace(/\\/g, "/").replace(/\/$/, "");
+            if (folderCache[pathStr]) return folderCache[pathStr];
+
+            const parts = pathStr.split("/");
+            let parentId = extractedFolder.id;
+
+            for (let i = 0; i < parts.length; i++) {
+              const subPath = parts.slice(0, i + 1).join("/");
+              if (folderCache[subPath]) {
+                parentId = folderCache[subPath];
+                continue;
+              }
+
+              const newFolder = await storage.createFolder({
+                name: parts[i],
+                parentId,
+                ownerId: req.user!.id
+              });
+              folderCache[subPath] = newFolder.id;
+              parentId = newFolder.id;
+            }
+            return parentId;
+          };
+
+          // Extract each entry
+          for (const entry of zipEntries) {
+            if (entry.isDirectory) {
+              await getOrCreateFolder(entry.entryName);
+              continue;
+            }
+
+            const relativePath = entry.entryName;
+            const folderPath = path.dirname(relativePath);
+            const targetFolderId = await getOrCreateFolder(folderPath);
+
+            // Extract file to uploads dir
+            const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1E9) + '-' + entry.name;
+            const diskPath = path.join(UPLOADS_DIR, uniqueName);
+            fs.writeFileSync(diskPath, entry.getData());
+
+            // Determine mime type
+            let mimeType = "application/octet-stream";
+            const ext = path.extname(entry.name).toLowerCase();
+            const mimeMap: Record<string, string> = {
+              '.pdf': 'application/pdf',
+              '.doc': 'application/msword',
+              '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              '.xls': 'application/vnd.ms-excel',
+              '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              '.png': 'image/png',
+              '.jpg': 'image/jpeg',
+              '.jpeg': 'image/jpeg',
+              '.gif': 'image/gif',
+              '.txt': 'text/plain',
+              '.html': 'text/html',
+              '.css': 'text/css',
+              '.js': 'application/javascript',
+              '.json': 'application/json',
+            };
+            if (mimeMap[ext]) mimeType = mimeMap[ext];
+
+            await storage.createFile({
+              name: entry.name,
+              folderId: targetFolderId,
+              size: entry.header.size,
+              mimeType,
+              path: diskPath,
+              createdBy: req.user!.id,
+            });
+          }
+
+          // Delete the original ZIP file after extraction
+          await storage.permanentDeleteFile(zipFile.id);
+          if (fs.existsSync(zipFile.path)) {
+            fs.unlinkSync(zipFile.path);
+          }
+
+          await storage.createAuditLog({
+            userId: req.user!.id,
+            action: "auto_extract_zip",
+            targetType: "file",
+            targetId: zipFile.id,
+            details: `Auto-extracted ZIP ${zipFile.name} into folder ${zipFolderName}`,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+          });
+
+          // Refresh folder and file lists
+          folders = await storage.getFolders(folderId, req.user!.id);
+          files = await storage.getFiles(folderId, req.user!.id);
+        }
+      } catch (zipErr) {
+        console.error(`Failed to auto-extract ZIP ${zipFile.name}:`, zipErr);
+        // Continue with other files, don't fail the whole request
+      }
+    }
 
     // Enrich folders with size (direct children only for now)
     const foldersWithSize = await Promise.all(folders.map(async (f) => {
@@ -924,6 +1052,77 @@ export async function registerRoutes(
     }
   });
 
+  // Share Multiple Items (Multi-select share)
+  app.post('/api/fs/share-multiple', requireAuth, async (req, res) => {
+    try {
+      const { items, userId, accessLevel } = req.body as {
+        items: { id: number; type: 'file' | 'folder' }[];
+        userId: number;
+        accessLevel: 'view' | 'edit' | 'download';
+      };
+      
+      if (!items || items.length === 0) {
+        return res.status(400).json({ message: "No items to share" });
+      }
+
+      let sharedCount = 0;
+      const errors: string[] = [];
+
+      for (const item of items) {
+        try {
+          // Verify ownership for each item
+          if (item.type === 'file') {
+            const file = await storage.getFile(item.id);
+            if (!file || file.createdBy !== req.user!.id) {
+              errors.push(`Cannot share file ${item.id}: Not owner`);
+              continue;
+            }
+          } else {
+            const folder = await storage.getFolder(item.id);
+            if (!folder || folder.ownerId !== req.user!.id) {
+              errors.push(`Cannot share folder ${item.id}: Not owner`);
+              continue;
+            }
+          }
+
+          await storage.createPermission({
+            fileId: item.type === 'file' ? item.id : null,
+            folderId: item.type === 'folder' ? item.id : null,
+            userId,
+            grantedBy: req.user!.id,
+            accessLevel
+          });
+          sharedCount++;
+        } catch (itemErr) {
+          errors.push(`Error sharing ${item.type} ${item.id}`);
+        }
+      }
+
+      await storage.createAuditLog({
+        userId: req.user!.id,
+        action: "grant_permission_multiple",
+        targetType: "multiple",
+        targetId: null,
+        details: `Shared ${sharedCount} items with user ${userId} as ${accessLevel}`,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent')
+      });
+
+      if (errors.length > 0 && sharedCount === 0) {
+        return res.status(403).json({ message: errors.join('; ') });
+      }
+
+      res.status(201).json({ 
+        message: `Shared ${sharedCount} item(s) successfully`,
+        sharedCount,
+        errors: errors.length > 0 ? errors : undefined
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ message: "Multi-share failed" });
+    }
+  });
+
   // Get Permissions
   app.get('/api/fs/:type/:id/permissions', requireAuth, async (req, res) => {
     const { type, id } = req.params;
@@ -978,6 +1177,21 @@ export async function registerRoutes(
       u.username.toLowerCase().includes(query.toLowerCase()) && u.id !== req.user!.id
     );
     res.json(filtered.map(u => ({ id: u.id, username: u.username })));
+  });
+
+  // Get all available users for sharing (excluding current user)
+  app.get('/api/users/available', requireAuth, async (req, res) => {
+    try {
+      const allUsers = await storage.getUsers();
+      console.log('All users from DB:', allUsers.map(u => ({ id: u.id, username: u.username, status: u.status })));
+      // Filter out current user, include all users regardless of status
+      const available = allUsers.filter(u => u.id !== req.user!.id);
+      console.log('Available users for sharing:', available.length);
+      res.json(available.map(u => ({ id: u.id, username: u.username })));
+    } catch (error) {
+      console.error('Error fetching available users:', error);
+      res.status(500).json({ message: 'Failed to fetch users' });
+    }
   });
 
   return httpServer;
