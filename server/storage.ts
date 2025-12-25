@@ -57,7 +57,7 @@ export interface IStorage {
   deletePermission(id: number): Promise<void>;
   getPermissions(targetId: number, targetType: 'file' | 'folder'): Promise<(Permission & { user: User })[]>;
   checkAccess(targetId: number, targetType: 'file' | 'folder', userId: number, requiredLevel: 'view' | 'download' | 'edit'): Promise<boolean>;
-  removePermission(targetId: number, targetType: 'file' | 'folder', userId: number): Promise<void>;
+  removePermission(targetId: number, targetType: 'file' | 'folder', userId: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -464,13 +464,14 @@ export class DatabaseStorage implements IStorage {
     return result.map(r => ({ ...r.permission, user: r.user }));
   }
 
-  async removePermission(targetId: number, targetType: 'file' | 'folder', userId: number): Promise<void> {
-    await db.delete(permissionsTable).where(
+  async removePermission(targetId: number, targetType: 'file' | 'folder', userId: number): Promise<boolean> {
+    const [result] = await db.delete(permissionsTable).where(
       and(
         eq(permissionsTable.userId, userId),
         targetType === 'file' ? eq(permissionsTable.fileId, targetId) : eq(permissionsTable.folderId, targetId)
       )
     );
+    return (result as any).affectedRows > 0;
   }
 
   async checkAccess(targetId: number, targetType: 'file' | 'folder', userId: number, requiredLevel: 'view' | 'download' | 'edit'): Promise<boolean> {

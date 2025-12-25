@@ -33,6 +33,14 @@ export function useLoginMutation() {
     },
     onSuccess: (user: User) => {
       queryClient.setQueryData([api.auth.me.path], user);
+
+      // Invalidate file system queries to ensure fresh data for the new user
+      // We use invalidateQueries instead of hard reload for a smoother experience
+      queryClient.invalidateQueries({ queryKey: [api.fs.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.fs.recent.path] });
+      queryClient.invalidateQueries({ queryKey: [api.fs.starred.path] });
+      queryClient.invalidateQueries({ queryKey: [api.fs.trash.path] });
+
       toast({
         title: "Welcome back",
         description: `Logged in as ${user.username}`,
